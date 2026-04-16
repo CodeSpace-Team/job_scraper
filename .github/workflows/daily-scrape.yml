@@ -46,7 +46,7 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: |
           # Build command with optional flags
-          CMD="python main_scraper.py --spreadsheet-id $SPREADSHEET_ID"
+          CMD="python main_scraper.py --spreadsheet-id $SPREADSHEET_ID --skip-linkedin"
           
           if [ "${{ github.event.inputs.skip_linkedin }}" = "true" ]; then
             CMD="$CMD --skip-linkedin"
