@@ -30,13 +30,9 @@ from scraper_utils import log, parse_date, clean_text, save_jobs, parse_date_for
 DEFAULT_SEARCH_TERMS = [
     "software developer",
     "software engineer",
-    "data engineer",
-    "devops engineer",
     "full stack developer",
     "backend developer",
     "frontend developer",
-    "data scientist",
-    "cloud engineer",
 ]
 
 _COMPANY_FROM_DESC_RE = re.compile(

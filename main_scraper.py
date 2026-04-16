@@ -118,8 +118,7 @@ def main():
         try:
             linkedin_jobs = linkedin_scraper.scrape_linkedin(
                 results_per_term=args.linkedin_results,
-                hours_old=720,  # 30 days
-                use_rate_limiting=True
+                hours_old=720  # 30 days
             )
             save_jobs(linkedin_jobs, "linkedin_jobs.json")
             all_jobs.extend(linkedin_jobs)

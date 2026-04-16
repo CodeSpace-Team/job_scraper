@@ -172,45 +172,66 @@ def write_to_sheet(jobs: list, spreadsheet_id: str, sheet_name: str = "Jobs"):
         "Years Exp", "Level", "Type", "Salary", "Summary", "Source", "Apply Link"
     ]
     
-    # Prepare data rows
-    rows = [headers] + [format_job_row(job) for job in unique_jobs]
+    # # Prepare data rows
+    # rows = [headers] + [format_job_row(job) for job in unique_jobs]
     
-    # Clear existing data
-    worksheet.clear()
+    # # Clear existing data
+    # worksheet.clear()
     
-    # Write all data at once (more efficient than row-by-row)
-    worksheet.update(rows, value_input_option='USER_ENTERED')
-    
-    log(f"✓ Wrote {len(unique_jobs)} jobs to sheet")
-    
-    # Format header row
+    # # Write all data at once (more efficient than row-by-row)
+    # worksheet.update(rows, value_input_option='USER_ENTERED')
+
+        # Prepare header row
+    headers = [
+        "Date Posted", "Job Title", "Company", "Role Category", "Location",
+        "Work Policy", "Required Skills", "Nice-to-Have Skills", 
+        "Years Exp", "Level", "Type", "Salary", "Summary", "Source", "Apply Link"
+    ]
+
+    # STEP 1 — Read existing sheet data
+    existing = worksheet.get_all_records()
+    existing_urls = set(str(row.get('Apply Link')).strip() for row in existing if row.get('Apply Link'))
+
+    # STEP 2 — Filter only new jobs
+    new_jobs = [job for job in unique_jobs if str(job.get('job_url', '')).strip() not in existing_urls]
+
+    log(f"Found {len(existing)} existing jobs")
+    log(f"Appending {len(new_jobs)} new jobs")
+
+    # STEP 3 — Write logic
+    if not existing:
+        # First run → write everything
+        rows = [headers] + [format_job_row(job) for job in unique_jobs]
+        worksheet.update(rows, value_input_option='USER_ENTERED')
+        log(f"✓ Wrote {len(unique_jobs)} jobs (initial load)")
+    else:
+        # Append only new jobs
+        if new_jobs:
+            new_rows = [format_job_row(job) for job in new_jobs]
+            worksheet.append_rows(new_rows, value_input_option='USER_ENTERED')
+            log(f"✓ Appended {len(new_jobs)} new jobs")
+        else:
+            log("✓ No new jobs to append")
+
+    # Formatting (safe to run every time)
     worksheet.format('A1:O1', {
-        'textFormat': {'bold': True},
+        'textFormat': {'bold': True, 'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}},
         'backgroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2},
-        'horizontalAlignment': 'LEFT',
-        'textFormat': {'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}}
+        'horizontalAlignment': 'LEFT'
     })
-    
-    # Freeze header row
+
     worksheet.freeze(rows=1)
-    
-    # Auto-resize columns
     worksheet.columns_auto_resize(0, 14)
-    
-    # Format date column
+
     worksheet.format('A2:A1000', {'numberFormat': {'type': 'DATE', 'pattern': 'yyyy-mm-dd'}})
-    
-    # Wrap text in description columns
-    worksheet.format('G2:H1000', {'wrapStrategy': 'WRAP'})  # Skills
-    worksheet.format('M2:M1000', {'wrapStrategy': 'WRAP'})  # Summary
-    
+    worksheet.format('G2:H1000', {'wrapStrategy': 'WRAP'})
+    worksheet.format('M2:M1000', {'wrapStrategy': 'WRAP'})
+
     log("✓ Applied formatting")
-    
-    # Get sheet URL
+
     sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
     log(f"\nSheet URL: {sheet_url}")
-    log(f"Public sharing: Make sure sheet is set to 'Anyone with the link can view'")
-    
+
     return sheet_url
 
 
