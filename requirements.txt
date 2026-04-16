@@ -1,0 +1,11 @@
+# Job scraping
+python-jobspy>=1.1.0
+pandas>=2.0.0
+requests>=2.31.0
+
+# AI enrichment
+anthropic>=0.40.0
+
+# Google Sheets
+gspread>=6.0.0
+oauth2client>=4.1.3
