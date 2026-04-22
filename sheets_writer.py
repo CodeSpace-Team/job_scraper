@@ -62,7 +62,7 @@ def authenticate_sheets(creds_json: str) -> gspread.Client:
     return client
 
 
-def format_job_row(job: dict) -> list:
+def format_job_row(job: dict, date_added: str = None) -> list:
     """Convert job dict to spreadsheet row."""
     # Helper to safely get values
     def get(key, default=""):
@@ -91,8 +91,13 @@ def format_job_row(job: dict) -> list:
         elif salary_max:
             salary_str = f"Up to {currency} {salary_max:,.0f}"
     
+    # Use current date/time if not provided
+    if date_added is None:
+        date_added = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     return [
-        get('date_posted'),                    # Date Posted
+        date_added,                            # Date Added to Sheet (NEW - for sorting)
+        get('date_posted'),                    # Date Job Posted
         get('title'),                          # Job Title
         get('company'),                        # Company
         get('primary_role'),                   # Role Category
@@ -142,7 +147,7 @@ def write_to_sheet(jobs: list, spreadsheet_id: str, sheet_name: str = "Jobs"):
         worksheet = spreadsheet.worksheet(sheet_name)
         log(f"Using existing worksheet: {sheet_name}")
     except gspread.exceptions.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=15)
+        worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=16)
         log(f"Created new worksheet: {sheet_name}")
     
     # Deduplicate jobs by URL
@@ -183,7 +188,7 @@ def write_to_sheet(jobs: list, spreadsheet_id: str, sheet_name: str = "Jobs"):
 
         # Prepare header row
     headers = [
-        "Date Posted", "Job Title", "Company", "Role Category", "Location",
+        "Date Added to Sheet", "Date Job Posted", "Job Title", "Company", "Role Category", "Location",
         "Work Policy", "Required Skills", "Nice-to-Have Skills", 
         "Years Exp", "Level", "Type", "Salary", "Summary", "Source", "Apply Link"
     ]
@@ -199,33 +204,64 @@ def write_to_sheet(jobs: list, spreadsheet_id: str, sheet_name: str = "Jobs"):
     log(f"Appending {len(new_jobs)} new jobs")
 
     # STEP 3 — Write logic
+    current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     if not existing:
         # First run → write everything
-        rows = [headers] + [format_job_row(job) for job in unique_jobs]
+        rows = [headers] + [format_job_row(job, date_added=current_datetime) for job in unique_jobs]
         worksheet.update(rows, value_input_option='USER_ENTERED')
         log(f"✓ Wrote {len(unique_jobs)} jobs (initial load)")
     else:
         # Append only new jobs
         if new_jobs:
-            new_rows = [format_job_row(job) for job in new_jobs]
+            new_rows = [format_job_row(job, date_added=current_datetime) for job in new_jobs]
             worksheet.append_rows(new_rows, value_input_option='USER_ENTERED')
             log(f"✓ Appended {len(new_jobs)} new jobs")
         else:
             log("✓ No new jobs to append")
 
     # Formatting (safe to run every time)
-    worksheet.format('A1:O1', {
-        'textFormat': {'bold': True, 'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}},
-        'backgroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2},
-        'horizontalAlignment': 'LEFT'
+    # Header row - prominent green color matching your branding
+    worksheet.format('A1:P1', {
+        'textFormat': {
+            'bold': True, 
+            'fontSize': 11,
+            'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}  # White text
+        },
+        'backgroundColor': {'red': 0.0, 'green': 0.6, 'blue': 0.5},  # Teal/green
+        'horizontalAlignment': 'LEFT',
+        'verticalAlignment': 'MIDDLE'
     })
 
+    # Freeze header row (stays visible when scrolling)
     worksheet.freeze(rows=1)
-    worksheet.columns_auto_resize(0, 14)
+    
+    # Auto-resize all columns
+    worksheet.columns_auto_resize(0, 15)
 
-    worksheet.format('A2:A1000', {'numberFormat': {'type': 'DATE', 'pattern': 'yyyy-mm-dd'}})
-    worksheet.format('G2:H1000', {'wrapStrategy': 'WRAP'})
-    worksheet.format('M2:M1000', {'wrapStrategy': 'WRAP'})
+    # Format Date Added to Sheet column (A)
+    worksheet.format('A2:A10000', {
+        'numberFormat': {'type': 'DATE_TIME', 'pattern': 'yyyy-mm-dd hh:mm:ss'}
+    })
+    
+    # Format Date Job Posted column (B)
+    worksheet.format('B2:B10000', {
+        'numberFormat': {'type': 'DATE', 'pattern': 'yyyy-mm-dd'}
+    })
+    
+    # Wrap text in skills columns (H and I)
+    worksheet.format('H2:I10000', {'wrapStrategy': 'WRAP'})
+    
+    # Wrap text in summary column (N)
+    worksheet.format('N2:N10000', {'wrapStrategy': 'WRAP'})
+
+    # Sort by Date Added to Sheet (column A) - newest first
+    # This ensures the sheet is always sorted with newest jobs at the top
+    try:
+        worksheet.sort((1, 'des'))  # Column 1 (A), descending
+        log("✓ Sorted by Date Added to Sheet (newest first)")
+    except Exception as e:
+        log(f"  Note: Could not auto-sort ({e})")
 
     log("✓ Applied formatting")
 

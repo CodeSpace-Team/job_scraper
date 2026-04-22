@@ -48,11 +48,8 @@ def _company_from_linkedin_url(url: str) -> str:
 DEFAULT_SEARCH_TERMS = [
     "software developer",
     "software engineer",
-    "data engineer",
-    "devops engineer",
     "full stack developer",
-    "python developer",
-    "java developer",
+    "javascript developer",
     "react developer",
 
 ]

@@ -22,7 +22,7 @@ on:
 jobs:
   scrape-and-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # Generous timeout for all scrapers
+    timeout-minutes: 45  # Generous timeout for all scrapers
     
     steps:
       - name: Checkout code

@@ -101,7 +101,7 @@ def main():
         log("\n--- Indeed ---")
         try:
             indeed_jobs = indeed_scraper.scrape_indeed(
-                results_per_term=args.indeed_results,
+                results_per_term=50,
                 hours_old=720  # 30 days
             )
             save_jobs(indeed_jobs, "indeed_jobs.json")

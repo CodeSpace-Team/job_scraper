@@ -29,9 +29,10 @@ from scraper_utils import log, parse_date, clean_text, save_jobs, parse_date_for
 
 DEFAULT_SEARCH_TERMS = [
     "software developer",
+    "junior developer",
     "software engineer",
     "full stack developer",
-    "backend developer",
+    "javascript developer",
     "frontend developer",
 ]
 

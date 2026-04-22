@@ -112,12 +112,9 @@ REQUEST_DELAY = 2.5  # seconds between requests — be respectful
 DEFAULT_SEARCHES = [
     "software-developer",
     "software-engineer",
+    "javascript-developer",
     "full-stack-developer",
-    "data-engineer",
-    "devops-engineer",
     "frontend-developer",
-    "backend-developer",
-    "cloud-engineer",
     "mobile-developer",
 ]
 
