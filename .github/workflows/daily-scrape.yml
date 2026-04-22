@@ -12,7 +12,7 @@ on:
         description: 'Skip LinkedIn scraping'
         required: false
         type: boolean
-        default: false
+        default: true
       skip_enrichment:
         description: 'Skip AI enrichment'
         required: false
@@ -45,18 +45,21 @@ jobs:
           GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: |
-          # Build command with optional flags
+          # Base command - skip LinkedIn by default
           CMD="python main_scraper.py --spreadsheet-id $SPREADSHEET_ID --skip-linkedin"
           
-          if [ "${{ github.event.inputs.skip_linkedin }}" = "true" ]; then
-            CMD="$CMD --skip-linkedin"
+          # Only for manual runs: allow user to include LinkedIn
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.skip_linkedin }}" = "false" ]; then
+            CMD="python main_scraper.py --spreadsheet-id $SPREADSHEET_ID"
+            echo "Manual run: INCLUDING LinkedIn"
           fi
           
+          # Check enrichment flag
           if [ "${{ github.event.inputs.skip_enrichment }}" = "true" ]; then
             CMD="$CMD --skip-enrichment"
           fi
           
-          # Run the pipeline
+          echo "Running: $CMD"
           $CMD
       
       - name: Archive job data (for debugging)
