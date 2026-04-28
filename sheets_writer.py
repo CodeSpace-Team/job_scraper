@@ -242,11 +242,15 @@ def write_to_sheet(jobs: list, spreadsheet_id: str, sheet_name: str = "Jobs"):
     # STEP 2 — Filter only new jobs
     new_jobs = [job for job in unique_jobs if str(job.get('job_url', '')).strip() not in existing_urls]
 
-    log(f"Found {len(existing)} existing jobs in sheet")
+    # existing can be either a list (normal read) or an int (after migration)
+    existing_count = len(existing) if isinstance(existing, list) else existing
+    log(f"Found {existing_count} existing jobs in sheet")
     log(f"Identified {len(new_jobs)} new jobs to add")
 
     # STEP 3 — Write logic
-    if not existing and not needs_migration:
+    has_existing = (isinstance(existing, list) and len(existing) > 0) or (isinstance(existing, int) and existing > 0)
+    
+    if not has_existing and not needs_migration:
         # First run → write everything with headers
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         rows = [headers] + [format_job_row(job, now) for job in unique_jobs]
