@@ -6,6 +6,7 @@ Writes job data to a Google Sheet with:
   - Auto-sorting (newest first)
   - Deduplication
   - Formatted columns
+  - Date Added to Sheet tracking
   - Stable public URL
 
 Requires:
@@ -63,7 +64,15 @@ def authenticate_sheets(creds_json: str) -> gspread.Client:
 
 
 def format_job_row(job: dict, date_added: str = None) -> list:
-    """Convert job dict to spreadsheet row."""
+    """Convert job dict to spreadsheet row.
+    
+    Args:
+        job: Job dictionary
+        date_added: Timestamp when job was added to sheet (defaults to now)
+    """
+    if date_added is None:
+        date_added = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
     # Helper to safely get values
     def get(key, default=""):
         val = job.get(key, default)
@@ -91,13 +100,9 @@ def format_job_row(job: dict, date_added: str = None) -> list:
         elif salary_max:
             salary_str = f"Up to {currency} {salary_max:,.0f}"
     
-    # Use current date/time if not provided
-    if date_added is None:
-        date_added = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
     return [
-        date_added,                            # Date Added to Sheet (NEW - for sorting)
-        get('date_posted'),                    # Date Job Posted
+        date_added,                            # Date Added to Sheet (Column A)
+        get('date_posted'),                    # Date Job Posted (Column B)
         get('title'),                          # Job Title
         get('company'),                        # Company
         get('primary_role'),                   # Role Category
@@ -111,7 +116,7 @@ def format_job_row(job: dict, date_added: str = None) -> list:
         salary_str,                            # Salary Range
         get('blurb'),                          # Summary
         get('source').title(),                 # Source
-        get('job_url'),                        # Apply Link
+        get('job_url'),                        # Apply Link (Column P) - THE ACTUAL URL!
     ]
 
 
@@ -162,7 +167,7 @@ def write_to_sheet(jobs: list, spreadsheet_id: str, sheet_name: str = "Jobs"):
             # Jobs without URL (shouldn't happen, but handle gracefully)
             unique_jobs.append(job)
     
-    log(f"Writing {len(unique_jobs)} unique jobs (from {len(jobs)} total)...")
+    log(f"Processing {len(unique_jobs)} unique jobs (from {len(jobs)} total)...")
     
     # Sort by date (newest first)
     unique_jobs.sort(
@@ -170,103 +175,125 @@ def write_to_sheet(jobs: list, spreadsheet_id: str, sheet_name: str = "Jobs"):
         reverse=True
     )
     
-    # Prepare header row
+    # Prepare header row (16 columns)
     headers = [
-        "Date Posted", "Job Title", "Company", "Role Category", "Location",
-        "Work Policy", "Required Skills", "Nice-to-Have Skills", 
+        "Date Added to Sheet", "Date Job Posted", "Job Title", "Company", "Role Category", 
+        "Location", "Work Policy", "Required Skills", "Nice-to-Have Skills", 
         "Years Exp", "Level", "Type", "Salary", "Summary", "Source", "Apply Link"
     ]
     
-    # # Prepare data rows
-    # rows = [headers] + [format_job_row(job) for job in unique_jobs]
-    
-    # # Clear existing data
-    # worksheet.clear()
-    
-    # # Write all data at once (more efficient than row-by-row)
-    # worksheet.update(rows, value_input_option='USER_ENTERED')
-
-        # Prepare header row
-    headers = [
-        "Date Added to Sheet", "Date Job Posted", "Job Title", "Company", "Role Category", "Location",
-        "Work Policy", "Required Skills", "Nice-to-Have Skills", 
-        "Years Exp", "Level", "Type", "Salary", "Summary", "Source", "Apply Link"
-    ]
-
-    # STEP 1 — Read existing sheet data
-    existing = worksheet.get_all_records()
-    existing_urls = set(str(row.get('Apply Link')).strip() for row in existing if row.get('Apply Link'))
+    # STEP 1 — Check if sheet needs migration (old 15-column format)
+    try:
+        existing_headers = worksheet.row_values(1)
+        needs_migration = (len(existing_headers) == 15 and existing_headers[0] == "Date Posted")
+        
+        if needs_migration:
+            log("⚠️  Detected old 15-column format - migrating to new 16-column format...")
+            
+            # Read all existing data (skip header row)
+            all_values = worksheet.get_all_values()
+            if len(all_values) > 1:
+                existing_data = all_values[1:]  # Skip header
+                
+                # Extract URLs from old column 15 (Apply Link)
+                existing_urls = set()
+                for row in existing_data:
+                    if len(row) >= 15 and row[14]:  # Column O (index 14) in old format
+                        existing_urls.add(str(row[14]).strip())
+                
+                log(f"  Found {len(existing_data)} existing jobs to migrate")
+            else:
+                existing_data = []
+                existing_urls = set()
+            
+            # Clear the entire sheet
+            worksheet.clear()
+            
+            # Write new headers
+            worksheet.update([headers], value_input_option='USER_ENTERED')
+            
+            # Migrate existing data (add Date Added column at the start)
+            if existing_data:
+                migration_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                migrated_rows = []
+                for row in existing_data:
+                    # Prepend the Date Added timestamp to shift everything right
+                    migrated_row = [migration_timestamp] + row
+                    migrated_rows.append(migrated_row)
+                
+                worksheet.append_rows(migrated_rows, value_input_option='USER_ENTERED')
+                log(f"  ✓ Migrated {len(migrated_rows)} existing jobs")
+            
+            existing = len(existing_data)
+        else:
+            # Normal read of existing data
+            try:
+                existing = worksheet.get_all_records()
+                existing_urls = set(str(row.get('Apply Link', '')).strip() for row in existing if row.get('Apply Link'))
+            except:
+                existing = []
+                existing_urls = set()
+    except:
+        # Empty sheet or error reading
+        existing = []
+        existing_urls = set()
+        needs_migration = False
 
     # STEP 2 — Filter only new jobs
     new_jobs = [job for job in unique_jobs if str(job.get('job_url', '')).strip() not in existing_urls]
 
-    log(f"Found {len(existing)} existing jobs")
-    log(f"Appending {len(new_jobs)} new jobs")
+    log(f"Found {len(existing)} existing jobs in sheet")
+    log(f"Identified {len(new_jobs)} new jobs to add")
 
     # STEP 3 — Write logic
-    current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    if not existing:
-        # First run → write everything
-        rows = [headers] + [format_job_row(job, date_added=current_datetime) for job in unique_jobs]
+    if not existing and not needs_migration:
+        # First run → write everything with headers
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        rows = [headers] + [format_job_row(job, now) for job in unique_jobs]
         worksheet.update(rows, value_input_option='USER_ENTERED')
         log(f"✓ Wrote {len(unique_jobs)} jobs (initial load)")
     else:
         # Append only new jobs
         if new_jobs:
-            new_rows = [format_job_row(job, date_added=current_datetime) for job in new_jobs]
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            new_rows = [format_job_row(job, now) for job in new_jobs]
             worksheet.append_rows(new_rows, value_input_option='USER_ENTERED')
             log(f"✓ Appended {len(new_jobs)} new jobs")
         else:
             log("✓ No new jobs to append")
 
-    # Formatting (safe to run every time)
-    # Header row - prominent green color matching your branding
+    # FORMATTING
+    # Header row: teal background, white bold text
     worksheet.format('A1:P1', {
-        'textFormat': {
-            'bold': True, 
-            'fontSize': 11,
-            'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}  # White text
-        },
-        'backgroundColor': {'red': 0.0, 'green': 0.6, 'blue': 0.5},  # Teal/green
-        'horizontalAlignment': 'LEFT',
-        'verticalAlignment': 'MIDDLE'
+        'textFormat': {'bold': True, 'fontSize': 11, 'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}},
+        'backgroundColor': {'red': 0, 'green': 0.6, 'blue': 0.5},  # Teal
+        'horizontalAlignment': 'LEFT'
     })
 
-    # Freeze header row (stays visible when scrolling)
+    # Freeze header row
     worksheet.freeze(rows=1)
     
-    # Auto-resize all columns
+    # Auto-resize columns
     worksheet.columns_auto_resize(0, 15)
 
-    # Format Date Added to Sheet column (A)
-    worksheet.format('A2:A10000', {
-        'numberFormat': {'type': 'DATE_TIME', 'pattern': 'yyyy-mm-dd hh:mm:ss'}
-    })
+    # Date formatting
+    worksheet.format('A2:A1000', {'numberFormat': {'type': 'DATE_TIME', 'pattern': 'yyyy-mm-dd hh:mm:ss'}})
+    worksheet.format('B2:B1000', {'numberFormat': {'type': 'DATE', 'pattern': 'yyyy-mm-dd'}})
     
-    # Format Date Job Posted column (B)
-    worksheet.format('B2:B10000', {
-        'numberFormat': {'type': 'DATE', 'pattern': 'yyyy-mm-dd'}
-    })
+    # Skills columns: wrap text
+    worksheet.format('H2:I1000', {'wrapStrategy': 'WRAP'})
     
-    # Wrap text in skills columns (H and I)
-    worksheet.format('H2:I10000', {'wrapStrategy': 'WRAP'})
-    
-    # Wrap text in summary column (N)
-    worksheet.format('N2:N10000', {'wrapStrategy': 'WRAP'})
+    # Summary column: wrap text
+    worksheet.format('N2:N1000', {'wrapStrategy': 'WRAP'})
 
-    # Sort by Date Added to Sheet (column A) - newest first
-    # This ensures the sheet is always sorted with newest jobs at the top
-    try:
-        worksheet.sort((1, 'des'))  # Column 1 (A), descending
-        log("✓ Sorted by Date Added to Sheet (newest first)")
-    except Exception as e:
-        log(f"  Note: Could not auto-sort ({e})")
+    # Sort by Date Added to Sheet (Column A) descending (newest first)
+    worksheet.sort((1, 'des'))
 
-    log("✓ Applied formatting")
+    log("✓ Applied formatting and sorting")
 
     sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
-    log(f"\nSheet URL: {sheet_url}")
+    log(f"\n✓ Sheet updated successfully!")
+    log(f"URL: {sheet_url}")
 
     return sheet_url
 
