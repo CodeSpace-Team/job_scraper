@@ -1,0 +1,1 @@
+SA_KEYWORDS = ["south africa", "cape town", "johannesburg", "durban", "pretoria", "gauteng"]

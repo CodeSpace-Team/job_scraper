@@ -23,6 +23,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from src.utils import log
 
 try:
     import anthropic

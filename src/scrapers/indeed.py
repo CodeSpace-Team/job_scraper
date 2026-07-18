@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
 """
-linkedin_scraper.py — Standalone LinkedIn SA job scraper (via JobSpy)
-======================================================================
+indeed_scraper.py — Standalone Indeed SA job scraper (via JobSpy)
+==================================================================
 Improvements over gajit_scraper.py:
-  - 300 results per term (was 50)
   - 30-day window (hours_old=720, was 168)
-  - Expanded search terms (10 terms)
-  - linkedin_fetch_description=True for full descriptions
-  - Per-term dedup to avoid re-processing duplicates
-
-Note: LinkedIn aggressively rate-limits. If you see many failures,
-reduce --results-per-term and increase term count instead.
+  - 100 results per term (was 50)
+  - 3000-char description snippets (was 500)
+  - Company name fallback from description when missing
 
 Usage:
-    python linkedin_scraper.py
-    python linkedin_scraper.py --results 300 --days 30
-    python linkedin_scraper.py -o linkedin_jobs.json --csv
+    python indeed_scraper.py
+    python indeed_scraper.py --results 100 --days 30
+    python indeed_scraper.py -o indeed_jobs.json --csv
 """
 
 import argparse
@@ -23,41 +19,67 @@ import re
 import sys
 import time
 
-from scraper_utils import log, parse_date, clean_text, save_jobs, parse_date_for_sort
+try:
+    import requests  # noqa: F401 — ensure requests available
+except ImportError:
+    print("Missing: pip install requests")
+    sys.exit(1)
 
-
-def _company_from_linkedin_url(url: str) -> str:
-    """
-    Extract a human-readable company name from a LinkedIn company URL.
-    e.g. https://www.linkedin.com/company/mindrift-ai  ->  Mindrift Ai
-         https://www.linkedin.com/company/executive-placements  ->  Executive Placements
-    """
-    if not url:
-        return ""
-    m = re.search(r'linkedin\.com/company/([^/?#]+)', url)
-    if not m:
-        return ""
-    slug = m.group(1).strip().rstrip('/')
-    # Strip trailing numeric ID if present (e.g. "some-company-12345")
-    slug = re.sub(r'-\d+$', '', slug)
-    # Convert hyphens to spaces and title-case
-    name = slug.replace('-', ' ').replace('_', ' ').strip()
-    return name.title() if name else ""
-
+from src.utils import log, parse_date, clean_text, save_jobs, parse_date_for_sort
 
 DEFAULT_SEARCH_TERMS = [
     "software developer",
+    "junior developer",
     "software engineer",
     "full stack developer",
     "javascript developer",
-    "react developer",
-
+    "frontend developer",
 ]
 
+_COMPANY_FROM_DESC_RE = re.compile(
+    r'^([A-Z][A-Za-z0-9&\s\-\.]{1,49}?)\s+is\s+(?:a|an|the)\b',
+    re.MULTILINE,
+)
 
-def scrape_linkedin(search_terms: list = None, results_per_term: int = 300,
-                    hours_old: int = 720) -> list:
-    """Scrape LinkedIn SA via JobSpy."""
+_UNLISTED = {"company unlisted", "unlisted", "confidential", "undisclosed", "n/a"}
+
+
+def _company_from_indeed_url(url: str) -> str:
+    """
+    Extract company name from an Indeed company URL.
+    e.g. https://za.indeed.com/cmp/Avbob          -> Avbob
+         https://za.indeed.com/cmp/Some-Company    -> Some Company
+         https://www.indeed.com/cmp/Takealot-Com   -> Takealot Com
+    """
+    if not url:
+        return ""
+    m = re.search(r'indeed\.com/cmp/([^/?#]+)', url)
+    if not m:
+        return ""
+    slug = m.group(1).strip().rstrip('/')
+    # Strip trailing numeric ID if present
+    slug = re.sub(r'-\d+$', '', slug)
+    # Convert hyphens/underscores to spaces — preserve original casing (Indeed uses Title Case)
+    name = slug.replace('-', ' ').replace('_', ' ').strip()
+    return name if name else ""
+
+
+def _extract_company_from_desc(desc: str) -> str:
+    """Attempt to infer company name from opening sentence of job description."""
+    if not desc:
+        return ""
+    m = _COMPANY_FROM_DESC_RE.search(desc[:800])
+    if m:
+        candidate = m.group(1).strip()
+        # Reject generic openers
+        if candidate.lower() not in ("we", "our company", "the company", "this role"):
+            return candidate
+    return ""
+
+
+def scrape_indeed(search_terms: list = None, results_per_term: int = 100,
+                  hours_old: int = 720) -> list:
+    """Scrape Indeed SA via JobSpy."""
     try:
         from jobspy import scrape_jobs
     except ImportError:
@@ -74,30 +96,28 @@ def scrape_linkedin(search_terms: list = None, results_per_term: int = 300,
         search_terms = DEFAULT_SEARCH_TERMS
 
     all_jobs = []
-    seen_urls: set = set()
 
     for term in search_terms:
-        log(f"  LinkedIn: searching '{term}' ({results_per_term} results, {hours_old}h window)...")
+        log(f"  Indeed: searching '{term}' ({results_per_term} results, {hours_old}h window)...")
         try:
             jobs_df = scrape_jobs(
-                site_name=["linkedin"],
+                site_name=["indeed"],
                 search_term=term,
                 location="South Africa",
                 results_wanted=results_per_term,
                 hours_old=hours_old,
+                country_indeed="South Africa",
                 description_format="markdown",
-                linkedin_fetch_description=True,
             )
         except Exception as e:
-            log(f"  LinkedIn error for '{term}': {e}")
-            time.sleep(10)
+            log(f"  Indeed error for '{term}': {e}")
+            time.sleep(5)
             continue
 
         if jobs_df is None or len(jobs_df) == 0:
-            log(f"  LinkedIn: 0 results for '{term}'")
+            log(f"  Indeed: 0 results for '{term}'")
             continue
 
-        term_new = 0
         for _, row in jobs_df.iterrows():
             def get(col, default=""):
                 try:
@@ -109,12 +129,6 @@ def scrape_linkedin(search_terms: list = None, results_per_term: int = 300,
                 if str(val) in ("nan", "None", "NaT"):
                     return default
                 return val
-
-            url = str(get("job_url", ""))
-            if url and url in seen_urls:
-                continue
-            if url:
-                seen_urls.add(url)
 
             date_str, time_str = parse_date(get("date_posted", ""))
 
@@ -156,6 +170,16 @@ def scrape_linkedin(search_terms: list = None, results_per_term: int = 300,
             desc_full = str(get("description", ""))
             desc_snippet = clean_text(desc_full, max_len=3000)
 
+            # Company — normalise placeholders, then try URL slug, then description regex
+            company = clean_text(get("company_name", ""))
+            if company.lower().strip() in _UNLISTED:
+                company = ""
+            company_url_val = str(get("company_url", ""))
+            if not company and company_url_val:
+                company = _company_from_indeed_url(company_url_val)
+            if not company:
+                company = _extract_company_from_desc(desc_full)
+
             # Employment type
             emp_type = get("job_type", "")
             if isinstance(emp_type, list):
@@ -170,21 +194,12 @@ def scrape_linkedin(search_terms: list = None, results_per_term: int = 300,
             else:
                 skills_str = str(skills_raw) if skills_raw else ""
 
-            # Company — normalise LinkedIn placeholder strings, then fall back to URL slug
-            _UNLISTED = {"company unlisted", "unlisted", "confidential", "undisclosed", "n/a"}
-            company = clean_text(get("company_name", ""))
-            if company.lower().strip() in _UNLISTED:
-                company = ""
-            company_url = str(get("company_url", ""))
-            if not company and company_url:
-                company = _company_from_linkedin_url(company_url)
-
             all_jobs.append({
-                "source": "linkedin",
+                "source": "indeed",
                 "title": clean_text(get("title", "")),
                 "company": company,
                 "company_logo": str(get("company_logo", "")),
-                "company_url": company_url,
+                "company_url": str(get("company_url", "")),
                 "company_description": clean_text(get("company_description", ""), 300),
                 "company_industry": clean_text(get("company_industry", "")),
                 "company_size": clean_text(get("company_num_employees", "")),
@@ -204,7 +219,7 @@ def scrape_linkedin(search_terms: list = None, results_per_term: int = 300,
                 "employment_type": emp_type,
                 "date_posted": date_str,
                 "time_posted": time_str,
-                "job_url": url,
+                "job_url": str(get("job_url", "")),
                 "job_url_direct": str(get("job_url_direct", "")),
                 "description_snippet": desc_snippet,
                 "salary_min": salary_min,
@@ -214,27 +229,36 @@ def scrape_linkedin(search_terms: list = None, results_per_term: int = 300,
                 "visa_sponsorship": None,
                 "requires_work_auth": None,
             })
-            term_new += 1
 
-        log(f"  LinkedIn '{term}': {term_new} new jobs (total: {len(all_jobs)})")
-        time.sleep(5)
+        log(f"  Indeed: {len(all_jobs)} total jobs so far")
+        time.sleep(3)
+
+    # Deduplicate by URL
+    seen = set()
+    unique = []
+    for job in all_jobs:
+        url = job.get("job_url", "")
+        key = url if url else f"{job['title']}|{job['company']}".lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(job)
 
     # Sort newest first
-    all_jobs.sort(
+    unique.sort(
         key=lambda j: parse_date_for_sort(j.get("date_posted", ""), j.get("time_posted", "")),
         reverse=True,
     )
 
-    log(f"LinkedIn: {len(all_jobs)} unique jobs")
-    return all_jobs
+    log(f"Indeed: {len(unique)} unique jobs (from {len(all_jobs)} raw)")
+    return unique
 
 
 def main():
-    parser = argparse.ArgumentParser(description="LinkedIn SA Job Scraper")
-    parser.add_argument("-o", "--output", default="linkedin_jobs.json",
-                        help="Output JSON file (default: linkedin_jobs.json)")
-    parser.add_argument("--results", "-r", type=int, default=300,
-                        help="Results per search term (default: 300)")
+    parser = argparse.ArgumentParser(description="Indeed SA Job Scraper")
+    parser.add_argument("-o", "--output", default="indeed_jobs.json",
+                        help="Output JSON file (default: indeed_jobs.json)")
+    parser.add_argument("--results", "-r", type=int, default=100,
+                        help="Results per search term (default: 100)")
     parser.add_argument("--days", "-d", type=int, default=30,
                         help="Max age of listings in days (default: 30)")
     parser.add_argument("--search", default=None,
@@ -246,13 +270,13 @@ def main():
     terms = [args.search] if args.search else None
     hours = args.days * 24
 
-    jobs = scrape_linkedin(search_terms=terms, results_per_term=args.results, hours_old=hours)
+    jobs = scrape_indeed(search_terms=terms, results_per_term=args.results, hours_old=hours)
 
     if not jobs:
         log("No jobs found.")
         sys.exit(1)
 
-    save_jobs(jobs, args.output, write_csv=args.csv, source_name="linkedin")
+    save_jobs(jobs, args.output, write_csv=args.csv, source_name="indeed")
     log(f"Done. {len(jobs)} jobs saved to {args.output}")
 
 

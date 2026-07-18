@@ -19,8 +19,8 @@ try:
 except ImportError:
     print("Missing: pip install requests")
     sys.exit(1)
-
-from scraper_utils import log, parse_date, clean_text, save_jobs, SA_KEYWORDS
+    
+from src.utils import log, parse_date, clean_text, save_jobs, SA_KEYWORDS
 
 
 OFFERZEN_API = "https://oz-public.vercel.app/api/jobs"
