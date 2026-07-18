@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 linkedin.py — LinkedIn SA Job Scraper (via JobSpy)
 ===================================================

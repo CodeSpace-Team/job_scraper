@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 indeed.py — Indeed SA Job Scraper (via JobSpy)
 ===============================================
@@ -16,6 +15,7 @@ Features:
 - Remote/hybrid detection
 - Automatic deduplication by URL
 - Sorted newest-first
+- Automatic retries with exponential backoff on JobSpy failures
 
 Why JobSpy?
 -----------
@@ -68,7 +68,14 @@ except ImportError:
     print("Missing: pip install requests")
     sys.exit(1)
 
-from src.utils import log, parse_date, clean_text, save_jobs, parse_date_for_sort
+from src.utils import (
+    log,
+    parse_date,
+    clean_text,
+    save_jobs,
+    parse_date_for_sort,
+    retry
+)
 
 # ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -80,6 +87,7 @@ DEFAULT_SEARCH_TERMS: Tuple[str, ...] = (
     "javascript developer",
     "frontend developer",
 )
+"""Default search terms for Indeed SA."""
 
 _UNLISTED_COMPANIES: Tuple[str, ...] = (
     "company unlisted",
@@ -88,11 +96,13 @@ _UNLISTED_COMPANIES: Tuple[str, ...] = (
     "undisclosed",
     "n/a",
 )
+"""Company names that indicate a missing or placeholder value."""
 
 _COMPANY_FROM_DESC_RE = re.compile(
     r'^([A-Z][A-Za-z0-9&\s\-\.]{1,49}?)\s+is\s+(?:a|an|the)\b',
     re.MULTILINE,
 )
+"""Regex to extract company name from description opener."""
 
 
 # ─── Helper Functions ──────────────────────────────────────────────────────
@@ -198,6 +208,45 @@ def _safe_get_row_value(row: Any, col: str, default: str = "") -> Any:
     return val
 
 
+# ─── Retry Wrapper for JobSpy ─────────────────────────────────────────────
+
+@retry(
+    exceptions=(Exception,),
+    tries=3,
+    delay=2.0,
+    backoff=2.0
+)
+def _scrape_indeed_term(
+    term: str,
+    results_per_term: int,
+    hours_old: int
+) -> Optional[Any]:
+    """
+    Scrape Indeed for a single search term with retries.
+
+    Args:
+        term (str): Search term.
+        results_per_term (int): Max results.
+        hours_old (int): Time window.
+
+    Returns:
+        pandas.DataFrame or None: DataFrame of jobs, or None if failed.
+
+    Raises:
+        Exception: If all retries are exhausted.
+    """
+    from jobspy import scrape_jobs
+    return scrape_jobs(
+        site_name=["indeed"],
+        search_term=term,
+        location="South Africa",
+        results_wanted=results_per_term,
+        hours_old=hours_old,
+        country_indeed="South Africa",
+        description_format="markdown",
+    )
+
+
 # ─── Main Scraper ──────────────────────────────────────────────────────────
 
 def scrape_indeed(
@@ -209,22 +258,23 @@ def scrape_indeed(
     Scrape tech jobs from Indeed South Africa.
 
     Args:
-        search_terms: List of search terms (defaults to DEFAULT_SEARCH_TERMS)
-        results_per_term: Max results per search term (default: 100)
-        hours_old: Only include jobs posted within this many hours (default: 720 = 30 days)
+        search_terms (list, optional): List of search terms (defaults to DEFAULT_SEARCH_TERMS)
+        results_per_term (int): Max results per search term (default: 100)
+        hours_old (int): Only include jobs posted within this many hours (default: 720 = 30 days)
 
     Returns:
-        List of job dictionaries with standardized fields
+        List[Dict[str, Any]]: List of job dictionaries with standardized fields.
 
     Raises:
-        No exceptions raised directly; errors are logged and handled gracefully
+        No exceptions raised directly; errors are logged and handled gracefully.
 
     Note:
         Uses JobSpy library which handles Indeed's anti-bot measures.
         Delays 3 seconds between search terms to avoid rate limiting.
+        Each term is retried up to 3 times on failure.
     """
     try:
-        from jobspy import scrape_jobs
+        from jobspy import scrape_jobs  # noqa: F401 (used in _scrape_indeed_term)
     except ImportError:
         log("JobSpy not installed. Run: pip install python-jobspy")
         return []
@@ -243,18 +293,11 @@ def scrape_indeed(
     for term in search_terms:
         log(f"  Indeed: searching '{term}' ({results_per_term} results, {hours_old}h window)...")
 
+        # ── Fetch with retries ──
         try:
-            jobs_df = scrape_jobs(
-                site_name=["indeed"],
-                search_term=term,
-                location="South Africa",
-                results_wanted=results_per_term,
-                hours_old=hours_old,
-                country_indeed="South Africa",
-                description_format="markdown",
-            )
+            jobs_df = _scrape_indeed_term(term, results_per_term, hours_old)
         except Exception as e:
-            log(f"  Indeed error for '{term}': {e}")
+            log(f"  Indeed error for '{term}' after retries: {e}")
             time.sleep(5)
             continue
 
@@ -262,8 +305,9 @@ def scrape_indeed(
             log(f"  Indeed: 0 results for '{term}'")
             continue
 
+        # ── Process each row ──
         for _, row in jobs_df.iterrows():
-            # Extract fields with safe access
+            # ── Basic fields ──
             date_str, time_str = parse_date(_safe_get_row_value(row, "date_posted", ""))
 
             # ── Salary ──
@@ -325,12 +369,11 @@ def scrape_indeed(
             else:
                 emp_type = str(emp_type) if emp_type else ""
 
-            # ── Skills ──
+            # ── Skills (safe list handling) ──
             skills_raw = _safe_get_row_value(row, "skills", [])
-            if isinstance(skills_raw, list):
-                skills_str = ", ".join(str(s) for s in skills_raw if s)
-            else:
-                skills_str = str(skills_raw) if skills_raw else ""
+            if not isinstance(skills_raw, list):
+                skills_raw = []
+            skills_str = ", ".join(str(s) for s in skills_raw if s)
 
             # ── Build Job Object ──
             all_jobs.append({
@@ -398,6 +441,8 @@ def scrape_indeed(
     return unique
 
 
+# ─── Standalone Entry Point ────────────────────────────────────────────────
+
 def main() -> None:
     """
     Command-line entry point for standalone Indeed scraper.
@@ -412,8 +457,8 @@ Examples:
     python -m src.scrapers.indeed --search "python developer" --csv
 
 Output:
-    indeed_jobs.json (or custom filename with -o)
-    indeed_jobs.csv (if --csv flag is used)
+    data/cache/indeed_jobs.json (or custom filename with -o)
+    data/cache/indeed_jobs.csv (if --csv flag is used)
 
 Note:
     Uses JobSpy library which handles Indeed's anti-bot measures.

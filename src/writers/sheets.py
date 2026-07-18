@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 sheets.py — Google Sheets Writer for Job Data
 ==============================================

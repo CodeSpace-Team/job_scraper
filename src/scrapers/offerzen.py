@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 offerzen.py — OfferZen SA Job Scraper
 ======================================
