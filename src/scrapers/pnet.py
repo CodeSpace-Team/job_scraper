@@ -1,47 +1,124 @@
 #!/usr/bin/env python3
 """
-PNet Job Scraper
-=================
-Scrapes tech job listings from pnet.co.za.
-PNet pages are server-rendered HTML — no browser needed.
+pnet.py — PNet SA Job Scraper (HTML Parsing)
+=============================================
 
-URL pattern: https://www.pnet.co.za/jobs/{search-term}?pg={page}
-Individual jobs: https://www.pnet.co.za/jobs--{slug}--{id}-inline.html
+Scrapes software development jobs from PNet South Africa (pnet.co.za)
+using BeautifulSoup HTML parsing.
 
-Can be used standalone or imported into gajit_scraper.py.
+⚠️  DISCLAIMER: PNet actively blocks scrapers.
+    This scraper uses TLS fingerprinting (tls_client) to bypass blocking.
+    Falls back to requests if tls_client is not available.
 
-Setup:
-    pip install requests beautifulsoup4
+Architecture:
+-------------
+1. Search Results Scraping:
+   - Visits: https://www.pnet.co.za/jobs/{search-term}?pg={page}
+   - Extracts job cards from HTML (BeautifulSoup)
+   - Handles pagination and duplicate detection
 
-Usage (standalone):
-    python pnet_scraper.py                          # Default search terms
-    python pnet_scraper.py --search "data engineer"  # Single search
-    python pnet_scraper.py --pages 5 --csv           # Limit pages, CSV output
+2. Individual Job Detail Scraping (Optional):
+   - Visits each job's detail page
+   - Extracts: full description, company info, industry, logo, etc.
+   - Uses 30s cooldown + 2.5s delay per job (slow but thorough)
+
+3. Anti-Blocking:
+   - TLS fingerprinting with chrome_120 (tls_client)
+   - Session reset on errors
+   - Exponential backoff retries (10s, then 20s)
+   - Random delays between requests
+
+Features:
+---------
+- 30-day lookback window (configurable)
+- 100 pages max per search term (configurable)
+- 3000-character description snippets
+- Smart company name extraction (URL slug + page title)
+- Company logo and industry extraction
+- Remote/hybrid detection
+- Automatic deduplication by URL
+- Sorted newest-first
+
+Performance:
+------------
+- ~6 search terms × 25 jobs/page = ~150 jobs per run
+- Detail fetching: ~6+ minutes for 150 jobs (2.5s each + 30s cooldown)
+- Total runtime: ~8-12 minutes (with details)
+
+Dependencies:
+-------------
+- beautifulsoup4: HTML parsing
+- tls-client: TLS fingerprinting (optional, falls back to requests)
+- requests: HTTP client (fallback)
+
+Environment:
+------------
+    None required (no API keys needed)
+
+Recommendation:
+---------------
+    PNet is the most brittle scraper due to HTML reliance.
+    Monitor regularly for failures and use --no-details for faster runs.
 """
 
 import argparse
 import json
 import re
-import time
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import List, Dict, Any, Optional, Set, Tuple
 
 from src.utils import log, clean_text, parse_date, parse_date_for_sort
 
 try:
     from bs4 import BeautifulSoup
 except ImportError:
-    print("Missing: pip install beautifulsoup4")
+    print("ERROR: beautifulsoup4 not installed. Run: pip install beautifulsoup4")
     sys.exit(1)
 
-# Use tls_client (mimics real browser TLS fingerprint) to bypass PNet's blocking.
-# Falls back to requests if tls_client isn't available.
+
+# ─── Constants ──────────────────────────────────────────────────────────────
+
+BASE_URL = "https://www.pnet.co.za/jobs"
+REQUEST_DELAY = 2.5  # seconds between requests — be respectful
+
+# Default search terms (URL-slug format)
+DEFAULT_SEARCH_TERMS: Tuple[str, ...] = (
+    "software-developer",
+    "software-engineer",
+    "javascript-developer",
+    "full-stack-developer",
+    "frontend-developer",
+    "mobile-developer",
+)
+
+# South African cities for location extraction
+SA_CITIES: Tuple[str, ...] = (
+    "johannesburg", "cape town", "pretoria", "durban", "sandton",
+    "centurion", "midrand", "stellenbosch", "bryanston", "rosebank",
+    "port elizabeth", "gqeberha", "randburg", "century city",
+    "bellville", "wynberg", "brackenfell", "northern suburbs",
+    "southern suburbs", "somerset west", "parktown", "gauteng",
+    "western cape", "kwazulu-natal"
+)
+
+# ─── Session Management ──────────────────────────────────────────────────
+
 _session = None
+
+
 def get_session():
+    """
+    Get or create a TLS session with anti-blocking fingerprint.
+
+    Uses tls_client for Chrome 120 fingerprint, falls back to requests.
+    """
     global _session
     if _session is not None:
         return _session
+
     try:
         import tls_client
         _session = tls_client.Session(
@@ -56,20 +133,37 @@ def get_session():
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         })
         log("  tls_client not found, falling back to requests (may get blocked)")
+
     return _session
 
 
-def reset_session():
-    """Discard the current TLS session so the next get_session() call creates a fresh one."""
+def reset_session() -> None:
+    """
+    Discard the current TLS session to force a fresh one on next request.
+    Used during retries to bypass temporary blocks.
+    """
     global _session
     _session = None
 
 
-def fetch_page(url: str) -> str | None:
-    """Fetch a page using the TLS session. Retries up to 3 times with session reset on error."""
+def fetch_page(url: str) -> Optional[str]:
+    """
+    Fetch a page using the TLS session with retries.
+
+    Args:
+        url: URL to fetch
+
+    Returns:
+        HTML content as string, or None if request fails
+
+    Note:
+        Retries up to 3 times with session reset and exponential backoff.
+    """
     max_retries = 3
+
     for attempt in range(max_retries):
         session = get_session()
+
         try:
             resp = session.get(
                 url,
@@ -79,12 +173,15 @@ def fetch_page(url: str) -> str | None:
                 },
                 timeout_seconds=45,
             )
+
             if resp.status_code == 404:
                 return None
             if resp.status_code != 200:
                 log(f"  PNet HTTP {resp.status_code} for {url[:80]}")
                 return None
+
             return resp.text
+
         except TypeError:
             # requests session uses 'timeout' not 'timeout_seconds'
             try:
@@ -94,6 +191,7 @@ def fetch_page(url: str) -> str | None:
                 return resp.text
             except Exception as e:
                 log(f"  PNet request error (attempt {attempt + 1}/{max_retries}): {e}")
+
         except Exception as e:
             log(f"  PNet request error (attempt {attempt + 1}/{max_retries}): {e}")
 
@@ -106,33 +204,104 @@ def fetch_page(url: str) -> str | None:
     return None
 
 
-# ─── Config ──────────────────────────────────────────────────────────────────
-BASE_URL = "https://www.pnet.co.za/jobs"
-REQUEST_DELAY = 2.5  # seconds between requests — be respectful
+# ─── Helper Functions ──────────────────────────────────────────────────────
 
-# Default search terms for tech roles
-DEFAULT_SEARCHES = [
-    "software-developer",
-    "software-engineer",
-    "javascript-developer",
-    "full-stack-developer",
-    "frontend-developer",
-    "mobile-developer",
-]
+def clean_title(title: str) -> str:
+    """
+    Clean up a PNet job title by removing extra whitespace and artifacts.
+
+    Args:
+        title: Raw job title from PNet
+
+    Returns:
+        Cleaned title string
+    """
+    return re.sub(r'\s+', ' ', title).strip()
 
 
+def extract_city(location: str) -> str:
+    """
+    Extract the primary city from a PNet location string.
 
-# ─── Parse a single listing page ────────────────────────────────────────────
-def parse_listing_page(html: str, search_term: str) -> list[dict]:
-    """Extract job cards from a PNet search results page."""
+    Args:
+        location: Location string (e.g., "Johannesburg, Gauteng")
+
+    Returns:
+        City name or empty string if not found
+    """
+    if not location:
+        return ""
+
+    # Check against known SA cities
+    for city in SA_CITIES:
+        if city.title() in location or city.lower() in location.lower():
+            return city.title()
+
+    # Fallback: first part of location string
+    parts = location.split(",")
+    return parts[0].strip() if parts else location
+
+
+def parse_relative_date(time_posted: str) -> str:
+    """
+    Convert a relative date string (e.g., "2 days ago") to YYYY-MM-DD.
+
+    Args:
+        time_posted: Relative date string from PNet
+
+    Returns:
+        Date in YYYY-MM-DD format or empty string
+    """
+    if not time_posted:
+        return ""
+
+    now = datetime.now()
+    time_lower = time_posted.lower()
+
+    try:
+        if "hour" in time_lower or "minute" in time_lower:
+            return now.strftime("%Y-%m-%d")
+
+        if "day" in time_lower:
+            days = int(re.search(r"(\d+)", time_lower).group(1))
+            return (now - timedelta(days=days)).strftime("%Y-%m-%d")
+
+        if "week" in time_lower:
+            weeks = int(re.search(r"(\d+)", time_lower).group(1))
+            return (now - timedelta(weeks=weeks)).strftime("%Y-%m-%d")
+
+        if "month" in time_lower:
+            months = int(re.search(r"(\d+)", time_lower).group(1))
+            return (now - timedelta(days=months * 30)).strftime("%Y-%m-%d")
+
+    except (ValueError, AttributeError):
+        pass
+
+    return ""
+
+
+# ─── Parse Listing Page ────────────────────────────────────────────────────
+
+def parse_listing_page(html: str, search_term: str) -> List[Dict[str, Any]]:
+    """
+    Extract job cards from a PNet search results page.
+
+    Args:
+        html: HTML content of the search results page
+        search_term: The search term used (for primary_role field)
+
+    Returns:
+        List of job dictionaries with basic fields
+    """
+    from datetime import timedelta
+
     soup = BeautifulSoup(html, "html.parser")
     jobs = []
 
-    # PNet job cards are typically <article> or <a> elements with job links
-    # From the HTML we can see the pattern: links like /jobs--Title-Location-Company--ID-inline.html
+    # Find all job links (PNet pattern: /jobs--Title-Location-Company--ID-inline.html)
     job_links = soup.find_all("a", href=re.compile(r"/jobs--.*--\d+-inline\.html"))
+    seen_urls: Set[str] = set()
 
-    seen_urls = set()
     for link in job_links:
         href = link.get("href", "")
         if not href or href in seen_urls:
@@ -153,55 +322,46 @@ def parse_listing_page(html: str, search_term: str) -> list[dict]:
         card_text = card.get_text(separator="\n", strip=True)
         lines = [l.strip() for l in card_text.split("\n") if l.strip()]
 
-        # Extract title from the link or h2/h3 inside the card
+        # ── Title ──
         title_el = card.find(["h2", "h3"])
         title = title_el.get_text(strip=True) if title_el else ""
         if not title and lines:
             title = lines[0]
 
-        # Extract company — usually in a separate element after title
+        # ── Company ──
         company = ""
         company_el = card.find("img", alt=True)
         if company_el:
             company = company_el.get("alt", "").strip()
 
-        # Look for company name in text (typically second distinct line)
         if not company:
             for line in lines[1:]:
-                # Skip lines that look like descriptions or metadata
                 if len(line) < 60 and not any(kw in line.lower() for kw in ["more", "ago", "new", "easy apply"]):
                     company = line
                     break
 
-        # Extract location
+        # ── Location ──
         location = ""
         for line in lines:
-            # PNet locations often contain SA city names
-            sa_cities = ["johannesburg", "cape town", "pretoria", "durban", "sandton",
-                        "centurion", "midrand", "stellenbosch", "bryanston", "rosebank",
-                        "port elizabeth", "gqeberha", "randburg", "century city",
-                        "bellville", "wynberg", "brackenfell", "northern suburbs",
-                        "southern suburbs", "somerset west", "parktown", "gauteng",
-                        "western cape", "kwazulu-natal"]
-            if any(city in line.lower() for city in sa_cities):
+            if any(city.lower() in line.lower() for city in SA_CITIES):
                 location = line
                 break
 
-        # Extract description snippet
+        # ── Description Snippet ──
         description = ""
         for line in lines:
-            if len(line) > 80:  # Long lines are likely description text
+            if len(line) > 80:
                 description = line[:500]
                 break
 
-        # Extract time posted
+        # ── Time Posted ──
         time_posted = ""
         for line in lines:
             if any(kw in line.lower() for kw in ["ago", "hour", "day", "week", "month"]):
                 time_posted = line.strip()
                 break
 
-        # Detect remote/hybrid
+        # ── Workplace Policy ──
         workplace = ""
         full_text = card_text.lower()
         if "fully remote" in full_text or "work from home" in full_text:
@@ -209,7 +369,7 @@ def parse_listing_page(html: str, search_term: str) -> list[dict]:
         elif "partially remote" in full_text or "hybrid" in full_text:
             workplace = "hybrid"
 
-        # Detect employment type
+        # ── Employment Type ──
         employment = ""
         if "full time" in full_text or "full-time" in full_text:
             employment = "fulltime"
@@ -222,33 +382,8 @@ def parse_listing_page(html: str, search_term: str) -> list[dict]:
         elif "permanent" in full_text:
             employment = "permanent"
 
-        # Convert relative time to date
-        date_posted = ""
-        now = datetime.now()
-        time_lower = time_posted.lower()
-        if "hour" in time_lower or "minute" in time_lower:
-            date_posted = now.strftime("%Y-%m-%d")
-        elif "day" in time_lower:
-            try:
-                days = int(re.search(r"(\d+)", time_lower).group(1))
-                from datetime import timedelta
-                date_posted = (now - timedelta(days=days)).strftime("%Y-%m-%d")
-            except:
-                date_posted = now.strftime("%Y-%m-%d")
-        elif "week" in time_lower:
-            try:
-                weeks = int(re.search(r"(\d+)", time_lower).group(1))
-                from datetime import timedelta
-                date_posted = (now - timedelta(weeks=weeks)).strftime("%Y-%m-%d")
-            except:
-                pass
-        elif "month" in time_lower:
-            try:
-                months = int(re.search(r"(\d+)", time_lower).group(1))
-                from datetime import timedelta
-                date_posted = (now - timedelta(days=months*30)).strftime("%Y-%m-%d")
-            except:
-                pass
+        # ── Date Posted ──
+        date_posted = parse_relative_date(time_posted)
 
         if title:
             jobs.append({
@@ -290,36 +425,27 @@ def parse_listing_page(html: str, search_term: str) -> list[dict]:
     return jobs
 
 
-def clean_title(title: str) -> str:
-    """Clean up job title."""
-    # Remove common PNet artifacts
-    title = re.sub(r'\s+', ' ', title).strip()
-    return title
+# ─── Parse Job Detail Page ─────────────────────────────────────────────────
 
-
-
-def extract_city(location: str) -> str:
-    """Pull the primary city from a PNet location string."""
-    if not location:
-        return ""
-    cities = ["Johannesburg", "Cape Town", "Pretoria", "Durban", "Sandton",
-              "Centurion", "Midrand", "Stellenbosch", "Bryanston", "Rosebank",
-              "Port Elizabeth", "Gqeberha", "Randburg", "Bellville",
-              "Century City", "Parktown", "Somerset West", "Wynberg",
-              "Brackenfell", "George"]
-    for city in cities:
-        if city.lower() in location.lower():
-            return city
-    # Fall back to first part
-    parts = location.split(",")
-    return parts[0].strip() if parts else location
-
-
-# ─── Fetch and parse individual job detail page ─────────────────────────────
-def fetch_job_details(job: dict) -> dict:
+def fetch_job_details(job: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Visit an individual PNet job page and extract rich details:
-    company, description, industry, company size, benefits, location, logo.
+    Visit an individual PNet job page and extract rich details.
+
+    Extracts:
+        - Full company name (from multiple fallbacks)
+        - Company logo
+        - Full job description (up to 3000 chars)
+        - Industry
+        - Company size
+        - About Us section
+        - Enhanced location
+        - Enhanced employment type
+
+    Args:
+        job: Basic job dictionary from listing page
+
+    Returns:
+        Enriched job dictionary
     """
     url = job.get("job_url", "")
     if not url:
@@ -332,45 +458,44 @@ def fetch_job_details(job: dict) -> dict:
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(separator="\n", strip=True)
 
-    # ── Company name ──
-    # PNet puts company in links to /cmp/en/CompanyName-ID/work.html
+    # ── Company Name ──
+    # Method 1: Company link (/cmp/en/CompanyName-ID/work.html)
     company_link = soup.find("a", href=re.compile(r"/cmp/en/"))
     if company_link:
         company_text = company_link.get_text(strip=True)
         if company_text and len(company_text) < 100:
             job["company"] = company_text
-        # Company URL
+
         href = company_link.get("href", "")
         if href:
             job["company_url"] = f"https://www.pnet.co.za{href}" if href.startswith("/") else href
 
-    # Fallback 1: page title often reads "Job Title - Job with CompanyName in City"
+    # Method 2: Page title ("Job Title - Job with CompanyName in City")
     if not job.get("company"):
         title_tag = soup.find("title")
         if title_tag:
-            m = re.search(r"\bwith\s+(.+?)\s+in\b", title_tag.get_text(strip=True), re.IGNORECASE)
-            if m:
-                candidate = m.group(1).strip()
+            match = re.search(r"\bwith\s+(.+?)\s+in\b", title_tag.get_text(strip=True), re.IGNORECASE)
+            if match:
+                candidate = match.group(1).strip()
                 if candidate and len(candidate) < 80:
                     job["company"] = candidate
 
-    # Fallback 2: extract from company URL slug (/cmp/en/CompanyName-ID/work.html)
+    # Method 3: URL slug (/cmp/en/CompanyName-ID/work.html)
     if not job.get("company") and job.get("company_url"):
-        m = re.search(r'/cmp/en/(.+?)(?:/|\?|$)', job["company_url"])
-        if m:
-            slug = re.sub(r'-\d+$', '', m.group(1)).replace('-', ' ').strip()
+        match = re.search(r'/cmp/en/(.+?)(?:/|\?|$)', job["company_url"])
+        if match:
+            slug = re.sub(r'-\d+$', '', match.group(1)).replace('-', ' ').strip()
             if slug:
                 job["company"] = slug
 
-    # ── Company logo ──
+    # ── Company Logo ──
     logo_img = soup.find("img", alt=re.compile(r"logo", re.I))
     if logo_img:
         src = logo_img.get("data-src") or logo_img.get("src", "")
         if src and "gif;base64" not in src:
             job["company_logo"] = src if src.startswith("http") else f"https://www.pnet.co.za{src}"
 
-    # ── Location ──
-    # Title tag often has "Job with Company in Location"
+    # ── Location from Title ──
     title_tag = soup.find("title")
     if title_tag:
         title_text = title_tag.get_text(strip=True)
@@ -379,36 +504,33 @@ def fetch_job_details(job: dict) -> dict:
             job["location"] = match.group(1).strip()
             job["city"] = extract_city(job["location"])
 
-    # ── Full job description ──
-    # The main description is typically the largest text block on the page
-    # Look for the content between the job title and the company info section
+    # ── Full Description ──
     desc_parts = []
     for line in text.split("\n"):
         line = line.strip()
-        # Skip navigation, headers, and footer content
         if not line or len(line) < 15:
             continue
-        if any(skip in line.lower() for skip in [
+
+        # Skip navigation/footer content
+        skip_keywords = (
             "sign in", "find jobs", "easy apply", "these jobs were popular",
             "open map", "company benefits", "show more benefits",
             "our location", "in short", "pnet is south africa",
             "company profile", "slide number"
-        ]):
+        )
+        if any(kw in line.lower() for kw in skip_keywords):
             continue
-        # Description lines tend to be longer
+
         if len(line) > 30:
             desc_parts.append(line)
 
     if desc_parts:
-        # The job description is usually the longest continuous block
         full_desc = " ".join(desc_parts)
-        # Keep up to 3000 chars — enrich_jobs.py needs more text for accurate skill extraction
         job["description_snippet"] = clean_text(full_desc, 3000)
 
     # ── Industry ──
     industry_match = re.search(r"\*\*Industry\*\*\s*(.+?)(?:\n|$)", text)
     if not industry_match:
-        # Try plain text pattern from the "In Short" section
         lines = text.split("\n")
         for i, line in enumerate(lines):
             if "Industry" in line and i + 1 < len(lines):
@@ -420,7 +542,7 @@ def fetch_job_details(job: dict) -> dict:
                 job["company_industry"] = line.replace("Industry", "").strip()
                 break
 
-    # ── Company size ──
+    # ── Company Size ──
     for line in text.split("\n"):
         if re.search(r"\d+-\d+\s*(employees|Employees)", line):
             match = re.search(r"(\d[\d,]+-\d[\d,]+)", line)
@@ -428,11 +550,10 @@ def fetch_job_details(job: dict) -> dict:
                 job["company_size"] = match.group(1) + " employees"
                 break
 
-    # ── Company description (About us) ──
+    # ── Company Description (About Us) ──
     about_idx = text.lower().find("about us")
     if about_idx > -1:
         about_text = text[about_idx + 8:about_idx + 800].strip()
-        # Clean up - take until we hit navigation/footer content
         about_lines = []
         for line in about_text.split("\n"):
             line = line.strip()
@@ -444,7 +565,7 @@ def fetch_job_details(job: dict) -> dict:
         if about_lines:
             job["company_description"] = clean_text(" ".join(about_lines), 300)
 
-    # ── Employment type from detail page ──
+    # ── Employment Type (Enhanced) ──
     text_lower = text.lower()
     if "permanent" in text_lower and not job["employment_type"]:
         job["employment_type"] = "permanent"
@@ -453,7 +574,7 @@ def fetch_job_details(job: dict) -> dict:
     elif "contract" in text_lower and not job["employment_type"]:
         job["employment_type"] = "contract"
 
-    # ── Remote/hybrid from detail page ──
+    # ── Workplace Policy (Enhanced) ──
     if not job["workplace_policy"]:
         if "fully remote" in text_lower or "work from home" in text_lower:
             job["workplace_policy"] = "remote"
@@ -461,33 +582,32 @@ def fetch_job_details(job: dict) -> dict:
         elif "hybrid" in text_lower or "partially remote" in text_lower:
             job["workplace_policy"] = "hybrid"
 
-    # ── Auto-enrich: skills, tech stack, experience, level, blurb ──
-    # Uses full page text for best extraction quality.
-    try:
-        import sys as _sys
-        from pathlib import Path as _Path
-        _sys.path.insert(0, str(_Path(__file__).parent))
-        from enrich_jobs import enrich_job as _enrich  # type: ignore
-        job = _enrich(job, full_text=text)
-    except ImportError:
-        pass  # enrich_jobs.py not present — run it as a separate step
-
     return job
 
 
-# ─── Scrape all pages for a search term ─────────────────────────────────────
-def scrape_pnet_search(search_term: str, max_pages: int = 100, cutoff_days: int = 30) -> list[dict]:
-    """Scrape all pages for a given search term on PNet.
+# ─── Scrape Search Term ────────────────────────────────────────────────────
+
+def scrape_pnet_search(
+    search_term: str,
+    max_pages: int = 100,
+    cutoff_days: int = 30
+) -> List[Dict[str, Any]]:
+    """
+    Scrape all pages for a given search term on PNet.
 
     Args:
-        search_term: URL-slug search term (e.g. "software-developer")
-        max_pages: Safety ceiling — stop after this many pages regardless (default: 100)
-        cutoff_days: Only collect jobs posted within this many days; 0 = no cutoff (default: 30)
+        search_term: URL-slug search term (e.g., "software-developer")
+        max_pages: Safety ceiling – stop after this many pages
+        cutoff_days: Only collect jobs posted within this many days (0 = no cutoff)
+
+    Returns:
+        List of job dictionaries from this search term
     """
     from datetime import timedelta
+
     all_jobs = []
     page = 1
-    seen_in_search: set[str] = set()
+    seen_in_search: Set[str] = set()
     cutoff_date = (datetime.now() - timedelta(days=cutoff_days)).strftime("%Y-%m-%d") if cutoff_days else None
 
     while page <= max_pages:
@@ -504,24 +624,29 @@ def scrape_pnet_search(search_term: str, max_pages: int = 100, cutoff_days: int 
         if not jobs:
             break
 
-        # ── Loop detection: PNet recycles listings once results are exhausted ──
+        # Loop detection: PNet recycles listings once results are exhausted
         new_jobs = [j for j in jobs if j.get("job_url") not in seen_in_search]
         for j in jobs:
             if j.get("job_url"):
                 seen_in_search.add(j["job_url"])
+
         if not new_jobs:
             log(f"  PNet '{search_term}' page {page}: all duplicates, stopping.")
             break
-        jobs = new_jobs
-        # ──────────────────────────────────────────────────────────────────────
 
+        jobs = new_jobs
+
+        # Filter by cutoff date
         if cutoff_date:
-            # Include jobs with no date (assume recent); exclude only confirmed-old jobs
-            recent = [j for j in jobs if not j.get("date_posted") or j.get("date_posted") >= cutoff_date]
+            recent = [
+                j for j in jobs
+                if not j.get("date_posted") or j.get("date_posted") >= cutoff_date
+            ]
             all_jobs.extend(recent)
             log(f"  PNet '{search_term}' page {page}: {len(recent)}/{len(jobs)} new within {cutoff_days}d")
+
             if len(recent) < len(jobs):
-                # At least some confirmed-old jobs appeared — hit the date boundary
+                # Hit the date boundary
                 break
         else:
             all_jobs.extend(jobs)
@@ -533,21 +658,33 @@ def scrape_pnet_search(search_term: str, max_pages: int = 100, cutoff_days: int 
     return all_jobs
 
 
-# ─── Main PNet scraper ──────────────────────────────────────────────────────
-def scrape_pnet(search_terms: list[str] = None, max_pages: int = 100,
-                fetch_details: bool = True, cutoff_days: int = 30) -> list[dict]:
+# ─── Main Scraper ──────────────────────────────────────────────────────────
+
+def scrape_pnet(
+    search_terms: Optional[List[str]] = None,
+    max_pages: int = 100,
+    fetch_details: bool = True,
+    cutoff_days: int = 30
+) -> List[Dict[str, Any]]:
     """
-    Scrape PNet across multiple search terms, deduplicate, then optionally
-    fetch full details from each individual job page.
+    Scrape PNet across multiple search terms with optional detail fetching.
 
     Args:
-        search_terms: List of URL-slug search terms (e.g. ["software-developer"])
-        max_pages: Safety ceiling — max pages per search term (default: 100)
-        fetch_details: If True, visit each job page for rich data (slower but much better)
-        cutoff_days: Only collect jobs posted within this many days; 0 = no cutoff (default: 30)
+        search_terms: List of URL-slug search terms (defaults to DEFAULT_SEARCH_TERMS)
+        max_pages: Safety ceiling – max pages per search term (default: 100)
+        fetch_details: If True, visit each job page for rich data (slower but better)
+        cutoff_days: Only collect jobs posted within this many days (default: 30)
+
+    Returns:
+        List of unique job dictionaries
+
+    Note:
+        Detail fetching adds significant runtime:
+        - ~6+ minutes for 150 jobs
+        - Use --no-details for faster runs
     """
     if search_terms is None:
-        search_terms = DEFAULT_SEARCHES
+        search_terms = list(DEFAULT_SEARCH_TERMS)
 
     log("PNet: Starting...")
     all_jobs = []
@@ -559,8 +696,9 @@ def scrape_pnet(search_terms: list[str] = None, max_pages: int = 100,
             time.sleep(1)
 
     # Deduplicate by URL
-    seen = set()
-    unique = []
+    seen: Set[str] = set()
+    unique: List[Dict[str, Any]] = []
+
     for job in all_jobs:
         url = job.get("job_url", "")
         if url and url not in seen:
@@ -573,31 +711,79 @@ def scrape_pnet(search_terms: list[str] = None, max_pages: int = 100,
     if fetch_details and unique:
         log(f"  PNet: Fetching details for {len(unique)} jobs (30s cooldown)...")
         time.sleep(30)
+
         for i, job in enumerate(unique):
             unique[i] = fetch_job_details(job)
             if (i + 1) % 10 == 0:
                 log(f"    ... {i + 1}/{len(unique)} details fetched")
             time.sleep(REQUEST_DELAY)
+
         log(f"  PNet: All details fetched.")
 
     return unique
 
 
-# ─── Standalone entry point ──────────────────────────────────────────────────
-def main():
-    parser = argparse.ArgumentParser(description="PNet SA Tech Job Scraper")
-    parser.add_argument("--output", "-o", default="pnet_jobs.json")
-    parser.add_argument("--search", default=None, help="Single search term (use hyphens: software-developer)")
-    parser.add_argument("--pages", "-p", type=int, default=100, help="Safety ceiling: max pages per search term (default: 100)")
-    parser.add_argument("--days", "-d", type=int, default=30, help="Only collect jobs posted within this many days (default: 30, use 0 for all)")
-    parser.add_argument("--csv", action="store_true")
-    parser.add_argument("--no-details", action="store_true",
-                        help="Skip fetching individual job pages (faster but less data)")
+# ─── Standalone Entry Point ───────────────────────────────────────────────
+
+def main() -> None:
+    """
+    Command-line entry point for standalone PNet scraper.
+    """
+    parser = argparse.ArgumentParser(
+        description="PNet SA Tech Job Scraper",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    python -m src.scrapers.pnet
+    python -m src.scrapers.pnet --search "data-engineer" --pages 5
+    python -m src.scrapers.pnet --no-details --csv
+
+Output:
+    data/cache/pnet_jobs.json (or custom filename with -o)
+    data/cache/pnet_jobs.csv (if --csv flag is used)
+
+⚠️  WARNING: PNet actively blocks scrapers.
+    This scraper uses tls_client for TLS fingerprinting.
+    If it fails, try installing tls_client: pip install tls-client
+
+Note:
+    Detail fetching (--no-details to skip) takes ~6+ minutes for 150 jobs.
+    Use --no-details for faster runs.
+        """
+    )
+    parser.add_argument(
+        "-o", "--output", default="data/cache/pnet_jobs.json",
+        help="Output JSON file (default: data/cache/pnet_jobs.json)"
+    )
+    parser.add_argument(
+        "--search", default=None,
+        help="Single search term (use hyphens: software-developer)"
+    )
+    parser.add_argument(
+        "--pages", "-p", type=int, default=100,
+        help="Safety ceiling: max pages per search term (default: 100)"
+    )
+    parser.add_argument(
+        "--days", "-d", type=int, default=30,
+        help="Only collect jobs posted within this many days (default: 30, use 0 for all)"
+    )
+    parser.add_argument(
+        "--csv", action="store_true",
+        help="Also write a CSV file"
+    )
+    parser.add_argument(
+        "--no-details", action="store_true",
+        help="Skip fetching individual job pages (faster but less data)"
+    )
     args = parser.parse_args()
 
-    terms = [args.search] if args.search else DEFAULT_SEARCHES
-    jobs = scrape_pnet(search_terms=terms, max_pages=args.pages,
-                       fetch_details=not args.no_details, cutoff_days=args.days)
+    terms = [args.search] if args.search else None
+    jobs = scrape_pnet(
+        search_terms=terms,
+        max_pages=args.pages,
+        fetch_details=not args.no_details,
+        cutoff_days=args.days
+    )
 
     output = {
         "scraped_at": datetime.now(timezone.utc).isoformat(),
@@ -607,7 +793,10 @@ def main():
     }
 
     outpath = Path(args.output)
-    outpath.write_text(json.dumps(output, indent=2, default=str, ensure_ascii=False), encoding="utf-8")
+    outpath.write_text(
+        json.dumps(output, indent=2, default=str, ensure_ascii=False),
+        encoding='utf-8'
+    )
     log(f"\nSaved {len(jobs)} jobs -> {outpath}")
 
     if args.csv:
