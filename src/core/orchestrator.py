@@ -21,10 +21,13 @@ import time
 from datetime import datetime
 
 from src.scrapers import offerzen, indeed, linkedin
+
+# PNet is optional - handle gracefully
 try:
     from src.scrapers import pnet
     HAS_PNET = True
 except ImportError:
+    pnet = None  # Explicitly set to None to avoid linter warnings
     HAS_PNET = False
 
 from src.enrichment import enhancer
@@ -32,7 +35,8 @@ from src.writers import sheets
 from src.utils import log, save_jobs
 
 
-def main():
+def main() -> None:
+    """Run the complete job scraping pipeline."""
     parser = argparse.ArgumentParser(description="Daily job scraping pipeline")
     parser.add_argument('-s', '--spreadsheet-id', required=True,
                         help='Google Sheets ID (required)')
@@ -56,6 +60,7 @@ def main():
 
     start_time = time.time()
     all_jobs = []
+    sheet_url = None  # Initialize for summary
 
     log("=" * 70)
     log("STARTING DAILY JOB SCRAPING PIPELINE")
@@ -81,7 +86,7 @@ def main():
         log("\n--- Indeed ---")
         try:
             indeed_jobs = indeed.scrape_indeed(
-                results_per_term=args.indeed_results,  # Use the CLI argument
+                results_per_term=args.indeed_results,
                 hours_old=720  # 30 days
             )
             save_jobs(indeed_jobs, "data/cache/indeed_jobs.json")
@@ -111,7 +116,7 @@ def main():
             log("  3. Running at a different time of day")
 
     # PNet (optional)
-    if not args.skip_pnet and HAS_PNET:
+    if not args.skip_pnet and HAS_PNET and pnet is not None:
         log("\n--- PNet ---")
         try:
             pnet_jobs = pnet.scrape_pnet()
@@ -173,7 +178,6 @@ def main():
         log("  1. GOOGLE_SHEETS_CREDS is set correctly")
         log("  2. Service account has access to the sheet")
         log("  3. Spreadsheet ID is correct")
-        # Save a local copy even on failure
         save_jobs(all_jobs, "data/cache/combined_jobs_fallback.json")
         log("  Saved fallback copy to data/cache/combined_jobs_fallback.json")
         sys.exit(1)
@@ -189,7 +193,10 @@ def main():
     log("=" * 70)
     log(f"Total jobs: {len(all_jobs)}")
     log(f"Time taken: {minutes}m {seconds}s")
-    log(f"Sheet URL: {sheet_url}")
+    if sheet_url:
+        log(f"Sheet URL: {sheet_url}")
+    else:
+        log("Sheet URL: Not available (write failed)")
     log("\nNext run: Tomorrow at the same time (via GitHub Actions)")
     log("=" * 70)
 
