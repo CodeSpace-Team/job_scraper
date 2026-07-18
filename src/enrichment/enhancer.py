@@ -73,7 +73,9 @@ except ImportError:
     print("ERROR: anthropic library not installed. Run: pip install anthropic")
     sys.exit(1)
 
-from src.utils import log, retry, load_jobs, save_jobs
+# ─── Direct imports from modules to avoid missing exports ────────────────
+from src.utils import log, retry
+from src.utils.io import load_jobs, save_jobs
 
 
 # ─── Constants ──────────────────────────────────────────────────────────────
@@ -224,7 +226,9 @@ def _call_claude_api(
         max_tokens=MAX_TOKENS,
         messages=[{"role": "user", "content": prompt}]
     )
-    return response.content[0].text.strip()
+    # `content` may contain blocks without `text` attribute; we assume a text block
+    # and use `# type: ignore` to silence Pylance.
+    return response.content[0].text.strip()  # type: ignore[attr-defined]
 
 
 # ─── Main Enrichment Function ─────────────────────────────────────────────
