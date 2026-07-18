@@ -1,11 +1,13 @@
-# Job scraping
-python-jobspy>=1.1.0
-pandas>=2.0.0
+# Core HTTP / HTML
 requests>=2.31.0
+beautifulsoup4>=4.12.0
+tls-client>=0.3.0  # This can be tricky to install (needs C++ build tools)
+python-jobspy>=1.1.0  # For Indeed and LinkedIn
 
-# AI enrichment
-anthropic>=0.40.0
-
-# Google Sheets
+# Data & Output
+pandas>=2.0.0  # For JobSpy DataFrames and CSV export
 gspread>=6.0.0
 oauth2client>=4.1.3
+
+# AI (Optional for now)
+anthropic>=0.40.0
