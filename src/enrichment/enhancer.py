@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 enhancer.py — AI-powered job enrichment via Anthropic Claude API
 =================================================================
@@ -30,11 +29,12 @@ Cost & Performance:
 - Batch size: 5 jobs per call
 - Rate limit: ~60 requests/minute (1.5s delay between batches)
 - Typical cost: ~$0.08 per 100 jobs (~$2.40/month at current volume)
+- Retries: 3 attempts with exponential backoff on API failures
 
 Usage (Standalone):
 -------------------
-    python -m src.enrichment.enhancer -i offerzen_jobs.json -o enriched.json
-    python -m src.enrichment.enhancer -i *.json --batch-size 10
+    python -m src.enrichment.enhancer -i data/cache/offerzen_jobs.json -o enriched.json
+    python -m src.enrichment.enhancer -i data/cache/*.json --batch-size 10
 
 Usage (Imported):
 -----------------
@@ -48,7 +48,7 @@ Environment Variables:
 Error Handling:
 ---------------
     - If JSON parsing fails: Logs the error and keeps jobs un-enriched
-    - If API call fails: Logs the error and keeps jobs un-enriched
+    - If API call fails: Retries 3 times, then keeps jobs un-enriched
     - If API key missing: Exits gracefully with error message
 
 Idempotency:
@@ -73,57 +73,28 @@ except ImportError:
     print("ERROR: anthropic library not installed. Run: pip install anthropic")
     sys.exit(1)
 
-
-def log(msg: str) -> None:
-    """
-    Simple timestamped logging.
-
-    Args:
-        msg: Message to log to console
-    """
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+from src.utils import log, retry, load_jobs, save_jobs
 
 
-def load_jobs(path: Path) -> List[Dict[str, Any]]:
-    """
-    Load jobs from a JSON file.
+# ─── Constants ──────────────────────────────────────────────────────────────
 
-    Supports two formats:
-        - {"jobs": [...]}  (preferred)
-        - [...]            (flat list)
+DEFAULT_BATCH_SIZE = 5
+"""Default number of jobs to process per API call."""
 
-    Args:
-        path: Path to JSON file
+DEFAULT_MODEL = "claude-haiku-4-5"
+"""Claude model to use for enrichment."""
 
-    Returns:
-        List of job dictionaries (empty list if file is empty or invalid)
-    """
-    try:
-        raw = json.loads(path.read_text(encoding='utf-8'))
-    except json.JSONDecodeError as e:
-        log(f"  ✗ Invalid JSON in {path.name}: {e}")
-        return []
+MAX_TOKENS = 4000
+"""Maximum tokens in Claude response."""
 
-    if isinstance(raw, dict):
-        return raw.get('jobs', [])
-    if isinstance(raw, list):
-        return raw
-    return []
+RATE_LIMIT_DELAY = 1.5
+"""Seconds to wait between API calls to respect rate limits."""
+
+MAX_RETRIES = 3
+"""Number of retry attempts for API calls."""
 
 
-def save_jobs(jobs: List[Dict[str, Any]], path: Path) -> None:
-    """
-    Save enriched jobs to a JSON file.
-
-    Args:
-        jobs: List of job dictionaries
-        path: Output file path
-    """
-    path.write_text(
-        json.dumps({"jobs": jobs}, indent=2, ensure_ascii=False),
-        encoding='utf-8'
-    )
-
+# ─── Helper Functions ──────────────────────────────────────────────────────
 
 def needs_enrichment(job: Dict[str, Any]) -> bool:
     """
@@ -152,10 +123,116 @@ def needs_enrichment(job: Dict[str, Any]) -> bool:
     return False
 
 
+def _build_prompt(batch: List[Dict[str, Any]]) -> str:
+    """
+    Build the prompt for Claude API.
+
+    Args:
+        batch: List of job dictionaries
+
+    Returns:
+        Prompt string for Claude
+    """
+    # Build job descriptions
+    jobs_text = []
+    for idx, job in enumerate(batch):
+        job_str = f"""
+Job {idx+1}:
+Title: {job.get('title', '')}
+Company: {job.get('company', '')}
+Description snippet: {job.get('description_snippet', '')[:1000]}
+Current skills: {job.get('must_have_skills', '')}
+"""
+        jobs_text.append(job_str)
+
+    # Construct the full prompt
+    return f"""Analyze these {len(batch)} South African tech job listings and extract structured data for each.
+
+{chr(10).join(jobs_text)}
+
+For each job, provide:
+1. primary_role: Normalized role category (e.g., "Backend Engineer", "Data Scientist", "DevOps Engineer", "Full Stack Developer")
+2. must_have_skills: 3-8 key technical skills required (comma-separated)
+3. nice_to_have_skills: 2-5 bonus skills mentioned (comma-separated)
+4. experience_years: Years of experience required (integer, or null if not specified)
+5. job_level: One of: intern, junior, mid, senior, lead, principal (or empty string if unclear)
+6. blurb: 1-2 sentence summary of the role
+
+Respond with ONLY valid JSON (no markdown):
+{{
+  "jobs": [
+    {{
+      "job_id": 1,
+      "primary_role": "Backend Engineer",
+      "must_have_skills": "Python, Django, PostgreSQL, REST APIs",
+      "nice_to_have_skills": "Docker, AWS, Redis",
+      "experience_years": 3,
+      "job_level": "mid",
+      "blurb": "Backend engineer role building scalable APIs for fintech platform."
+    }},
+    ...
+  ]
+}}"""
+
+
+def _parse_response(response_text: str) -> List[Dict[str, Any]]:
+    """
+    Parse Claude's JSON response and extract enriched jobs.
+
+    Args:
+        response_text: Raw response from Claude
+
+    Returns:
+        List of enriched job dictionaries
+
+    Raises:
+        json.JSONDecodeError: If response is not valid JSON
+    """
+    # Strip markdown code fences if present
+    cleaned = re.sub(r'^```json\s*', '', response_text)
+    cleaned = re.sub(r'\s*```$', '', cleaned)
+
+    data = json.loads(cleaned)
+    return data.get('jobs', [])
+
+
+@retry(
+    exceptions=(Exception,),
+    tries=MAX_RETRIES,
+    delay=2.0,
+    backoff=2.0
+)
+def _call_claude_api(
+    client: anthropic.Anthropic,
+    prompt: str
+) -> str:
+    """
+    Call Claude API with retries.
+
+    Args:
+        client: Anthropic client
+        prompt: Prompt to send to Claude
+
+    Returns:
+        Claude's response text
+
+    Raises:
+        Exception: If API call fails after all retries
+    """
+    response = client.messages.create(
+        model=DEFAULT_MODEL,
+        max_tokens=MAX_TOKENS,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.content[0].text.strip()
+
+
+# ─── Main Enrichment Function ─────────────────────────────────────────────
+
 def enrich_batch(
     jobs: List[Dict[str, Any]],
     api_key: str,
-    batch_size: int = 5
+    batch_size: int = DEFAULT_BATCH_SIZE
 ) -> List[Dict[str, Any]]:
     """
     Enrich a batch of jobs using Claude API.
@@ -185,62 +262,17 @@ def enrich_batch(
         batch = jobs[i:i + batch_size]
         log(f"Enriching jobs {i+1}-{min(i+batch_size, len(jobs))} of {len(jobs)}...")
 
-        # Build prompt with batch of jobs
-        jobs_text = []
-        for idx, job in enumerate(batch):
-            job_str = f"""
-Job {idx+1}:
-Title: {job.get('title', '')}
-Company: {job.get('company', '')}
-Description snippet: {job.get('description_snippet', '')[:1000]}
-Current skills: {job.get('must_have_skills', '')}
-"""
-            jobs_text.append(job_str)
-
-        prompt = f"""Analyze these {len(batch)} South African tech job listings and extract structured data for each.
-
-{chr(10).join(jobs_text)}
-
-For each job, provide:
-1. primary_role: Normalized role category (e.g., "Backend Engineer", "Data Scientist", "DevOps Engineer", "Full Stack Developer")
-2. must_have_skills: 3-8 key technical skills required (comma-separated)
-3. nice_to_have_skills: 2-5 bonus skills mentioned (comma-separated)
-4. experience_years: Years of experience required (integer, or null if not specified)
-5. job_level: One of: intern, junior, mid, senior, lead, principal (or empty string if unclear)
-6. blurb: 1-2 sentence summary of the role
-
-Respond with ONLY valid JSON (no markdown):
-{{
-  "jobs": [
-    {{
-      "job_id": 1,
-      "primary_role": "Backend Engineer",
-      "must_have_skills": "Python, Django, PostgreSQL, REST APIs",
-      "nice_to_have_skills": "Docker, AWS, Redis",
-      "experience_years": 3,
-      "job_level": "mid",
-      "blurb": "Backend engineer role building scalable APIs for fintech platform."
-    }},
-    ...
-  ]
-}}"""
+        # Build prompt
+        prompt = _build_prompt(batch)
 
         response_text = ""  # Initialize to avoid linter warnings
+
         try:
-            response = client.messages.create(
-                model="claude-haiku-4-5",
-                max_tokens=4000,
-                messages=[{"role": "user", "content": prompt}]
-            )
+            # Call API with retries
+            response_text = _call_claude_api(client, prompt)
 
-            response_text = response.content[0].text.strip()
-
-            # Strip markdown code fences if present
-            response_text = re.sub(r'^```json\s*', '', response_text)
-            response_text = re.sub(r'\s*```$', '', response_text)
-
-            enrichment_data = json.loads(response_text)
-            enriched_jobs = enrichment_data.get('jobs', [])
+            # Parse response
+            enriched_jobs = _parse_response(response_text)
 
             # Merge enrichment data back into original jobs
             for job, enrichment in zip(batch, enriched_jobs):
@@ -262,15 +294,17 @@ Respond with ONLY valid JSON (no markdown):
             enriched.extend(batch)
 
         except Exception as e:
-            log(f"  ✗ API error: {e}")
+            log(f"  ✗ API error after retries: {e}")
             # Add jobs without enrichment so pipeline continues
             enriched.extend(batch)
 
         # Rate limiting: ~60 requests/minute max for Claude API
-        time.sleep(1.5)
+        time.sleep(RATE_LIMIT_DELAY)
 
     return enriched
 
+
+# ─── Standalone Entry Point ───────────────────────────────────────────────
 
 def main() -> None:
     """
@@ -281,12 +315,15 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python -m src.enrichment.enhancer -i offerzen_jobs.json
-    python -m src.enrichment.enhancer -i *.json --batch-size 10
+    python -m src.enrichment.enhancer -i data/cache/offerzen_jobs.json
+    python -m src.enrichment.enhancer -i data/cache/*.json --batch-size 10
     python -m src.enrichment.enhancer -i jobs.json --force --output all_enriched.json
 
 Environment:
     ANTHROPIC_API_KEY must be set in environment
+
+Output:
+    {input}_enriched.json (or custom filename with -o)
         """
     )
     parser.add_argument(
@@ -295,11 +332,11 @@ Environment:
     )
     parser.add_argument(
         '-o', '--output', default=None,
-        help='Output file (default: input_enriched.json)'
+        help='Output file (default: {input}_enriched.json)'
     )
     parser.add_argument(
-        '--batch-size', type=int, default=5,
-        help='Jobs per API call (default: 5, range: 3-10 recommended)'
+        '--batch-size', type=int, default=DEFAULT_BATCH_SIZE,
+        help=f'Jobs per API call (default: {DEFAULT_BATCH_SIZE}, range: 3-10 recommended)'
     )
     parser.add_argument(
         '--force', action='store_true',
