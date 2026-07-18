@@ -169,7 +169,8 @@ def _extract_company_from_desc(desc: str) -> str:
     return ""
 
 
-def _safe_get_row_value(row: Any, col: str, default: str = "") -> Any:
+def _safe_get_row_value(row: Any, col: str, default: Any = "") -> Any:
+
     """
     Safely extract a value from a pandas DataFrame row.
 

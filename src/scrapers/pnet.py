@@ -197,7 +197,7 @@ def _fetch_page_with_retry(url: str) -> Optional[str]:
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-ZA,en;q=0.9",
             },
-            timeout_seconds=45,
+            timeout_seconds=45,  # type: ignore
         )
         if resp.status_code == 404:
             return None
@@ -363,7 +363,8 @@ def parse_listing_page(html: str, search_term: str) -> List[Dict[str, Any]]:
     seen_urls: Set[str] = set()
 
     for link in job_links:
-        href = link.get("href", "")
+        # Convert href to string to avoid AttributeValueList issues
+        href = str(link.get("href", ""))
         if not href or href in seen_urls:
             continue
         seen_urls.add(href)
@@ -392,7 +393,7 @@ def parse_listing_page(html: str, search_term: str) -> List[Dict[str, Any]]:
         company = ""
         company_el = card.find("img", alt=True)
         if company_el:
-            company = company_el.get("alt", "").strip()
+            company = str(company_el.get("alt", "")).strip()
 
         if not company:
             for line in lines[1:]:
@@ -527,7 +528,7 @@ def fetch_job_details(job: Dict[str, Any]) -> Dict[str, Any]:
             if company_text and len(company_text) < 100:
                 job["company"] = company_text
 
-            href = company_link.get("href", "")
+            href = str(company_link.get("href", ""))
             if href:
                 job["company_url"] = f"https://www.pnet.co.za{href}" if href.startswith("/") else href
 
@@ -535,7 +536,8 @@ def fetch_job_details(job: Dict[str, Any]) -> Dict[str, Any]:
         if not job.get("company"):
             title_tag = soup.find("title")
             if title_tag:
-                match = re.search(r"\bwith\s+(.+?)\s+in\b", title_tag.get_text(strip=True), re.IGNORECASE)
+                title_text = title_tag.get_text(strip=True)
+                match = re.search(r"\bwith\s+(.+?)\s+in\b", title_text, re.IGNORECASE)
                 if match:
                     candidate = match.group(1).strip()
                     if candidate and len(candidate) < 80:
@@ -543,7 +545,7 @@ def fetch_job_details(job: Dict[str, Any]) -> Dict[str, Any]:
 
         # Method 3: URL slug (/cmp/en/CompanyName-ID/work.html)
         if not job.get("company") and job.get("company_url"):
-            match = re.search(r'/cmp/en/(.+?)(?:/|\?|$)', job["company_url"])
+            match = re.search(r'/cmp/en/(.+?)(?:/|\?|$)', str(job["company_url"]))
             if match:
                 slug = re.sub(r'-\d+$', '', match.group(1)).replace('-', ' ').strip()
                 if slug:
@@ -552,7 +554,7 @@ def fetch_job_details(job: Dict[str, Any]) -> Dict[str, Any]:
         # ── Company Logo ──
         logo_img = soup.find("img", alt=re.compile(r"logo", re.I))
         if logo_img:
-            src = logo_img.get("data-src") or logo_img.get("src", "")
+            src = str(logo_img.get("data-src") or logo_img.get("src", ""))
             if src and "gif;base64" not in src:
                 job["company_logo"] = src if src.startswith("http") else f"https://www.pnet.co.za{src}"
 
@@ -703,7 +705,7 @@ def scrape_pnet_search(
         if cutoff_date:
             recent = [
                 j for j in jobs
-                if not j.get("date_posted") or j.get("date_posted") >= cutoff_date
+                if not j.get("date_posted") or (j.get("date_posted") and j["date_posted"] >= cutoff_date)
             ]
             all_jobs.extend(recent)
             log(f"  PNet '{search_term}' page {page}: {len(recent)}/{len(jobs)} new within {cutoff_days}d")

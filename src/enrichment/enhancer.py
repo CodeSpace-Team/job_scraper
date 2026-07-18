@@ -75,7 +75,7 @@ except ImportError:
 
 # ─── Direct imports from modules to avoid missing exports ────────────────
 from src.utils import log, retry
-from src.utils.io import load_jobs, save_jobs
+from src.utils import log, retry, load_jobs, save_jobs
 
 
 # ─── Constants ──────────────────────────────────────────────────────────────

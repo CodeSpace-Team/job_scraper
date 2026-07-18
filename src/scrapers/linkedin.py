@@ -118,7 +118,7 @@ def _company_from_linkedin_url(url: str) -> str:
     return name.title() if name else ""
 
 
-def _safe_get_row_value(row: Any, col: str, default: str = "") -> Any:
+def _safe_get_row_value(row: Any, col: str, default: Any = "") -> Any:
     """
     Safely extract a value from a pandas DataFrame row.
 

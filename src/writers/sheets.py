@@ -165,8 +165,8 @@ def authenticate_sheets(creds_json: str) -> gspread.Client:
         Exception: If authentication fails
     """
     creds_dict = json.loads(creds_json)
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SHEET_SCOPES)
-    return gspread.authorize(creds)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SHEET_SCOPES) # type: ignore
+    return gspread.authorize(creds) #type: ignore
 
 
 def format_salary(job: Dict[str, Any]) -> str:
@@ -368,7 +368,7 @@ def write_to_sheet(
 
             # Clear and rewrite with new headers
             worksheet.clear()
-            worksheet.update([HEADERS], value_input_option='USER_ENTERED')
+            worksheet.update([HEADERS], value_input_option='USER_ENTERED') # type: ignore
 
             # Migrate existing data
             if existing_data:
@@ -376,7 +376,7 @@ def write_to_sheet(
                 migrated_rows = [
                     [migration_timestamp] + row for row in existing_data
                 ]
-                worksheet.append_rows(migrated_rows, value_input_option='USER_ENTERED')
+                worksheet.append_rows(migrated_rows, value_input_option='USER_ENTERED') # type: ignore
                 log(f"  ✓ Migrated {len(migrated_rows)} existing jobs")
 
             existing_count = len(existing_data)
@@ -417,14 +417,14 @@ def write_to_sheet(
         # First run: write everything with headers
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         rows = [HEADERS] + [format_job_row(job, now) for job in unique_jobs]
-        worksheet.update(rows, value_input_option='USER_ENTERED')
+        worksheet.update(rows, value_input_option='USER_ENTERED') # type: ignore
         log(f"✓ Wrote {len(unique_jobs)} jobs (initial load)")
     else:
         # Append only new jobs
         if new_jobs:
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             new_rows = [format_job_row(job, now) for job in new_jobs]
-            worksheet.append_rows(new_rows, value_input_option='USER_ENTERED')
+            worksheet.append_rows(new_rows, value_input_option='USER_ENTERED') # type: ignore
             log(f"✓ Appended {len(new_jobs)} new jobs")
         else:
             log("✓ No new jobs to append")
