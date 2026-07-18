@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 main.py — CLI Entry Point for the Job Scraper Pipeline
 =======================================================
