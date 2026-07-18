@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 orchestrator.py — Pipeline orchestration for daily job scraping
 ================================================================

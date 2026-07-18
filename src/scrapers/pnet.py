@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 pnet.py — PNet SA Job Scraper (HTML Parsing)
 =============================================

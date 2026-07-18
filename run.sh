@@ -7,6 +7,8 @@
 #   with all jobs from OfferZen, Indeed, and PNet.
 #
 # USAGE:
+# 1. Make it executable (first time only) 
+# chmod +x run.sh
 #   ./run.sh                    # Run with default settings (skip LinkedIn)
 #   ./run.sh --skip-pnet        # Skip PNet (faster runs, ~2 min)
 #   ./run.sh --skip-enrichment  # Skip AI enrichment (faster, no Claude API)
