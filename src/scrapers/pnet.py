@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 pnet.py — PNet SA Job Scraper (HTML Parsing)
 =============================================
@@ -37,6 +38,8 @@ Features:
 - Remote/hybrid detection
 - Automatic deduplication by URL
 - Sorted newest-first
+- Multiple CSS selectors for resilience against HTML changes
+- Safe regex extraction with fallbacks
 
 Performance:
 ------------
@@ -69,7 +72,14 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple
 
-from src.utils import log, clean_text, parse_date, parse_date_for_sort
+from src.utils import (
+    log,
+    clean_text,
+    parse_date,
+    parse_date_for_sort,
+    retry,
+    safe_get
+)
 
 try:
     from bs4 import BeautifulSoup
@@ -81,7 +91,13 @@ except ImportError:
 # ─── Constants ──────────────────────────────────────────────────────────────
 
 BASE_URL = "https://www.pnet.co.za/jobs"
-REQUEST_DELAY = 2.5  # seconds between requests — be respectful
+"""Base URL for PNet search results."""
+
+REQUEST_DELAY = 2.5
+"""Seconds between requests — be respectful."""
+
+MAX_PAGES = 100
+"""Safety cap to prevent infinite pagination loops."""
 
 # Default search terms (URL-slug format)
 DEFAULT_SEARCH_TERMS: Tuple[str, ...] = (
@@ -102,6 +118,15 @@ SA_CITIES: Tuple[str, ...] = (
     "southern suburbs", "somerset west", "parktown", "gauteng",
     "western cape", "kwazulu-natal"
 )
+
+# HTML selectors to find job cards (multiple fallbacks)
+JOB_LINK_SELECTORS: Tuple[str, ...] = (
+    "a[href*='jobs--'][href*='-inline.html']",
+    "article[class*='job'] a[href*='/jobs--']",
+    "div[class*='listing'] a[href*='/jobs--']",
+)
+"""CSS selectors for job links, in order of preference."""
+
 
 # ─── Session Management ──────────────────────────────────────────────────
 
@@ -145,62 +170,75 @@ def reset_session() -> None:
     _session = None
 
 
+@retry(
+    exceptions=(Exception,),
+    tries=3,
+    delay=5.0,
+    backoff=2.0
+)
+def _fetch_page_with_retry(url: str) -> Optional[str]:
+    """
+    Fetch a page with retries using the TLS session.
+
+    Args:
+        url: URL to fetch.
+
+    Returns:
+        HTML content as string, or None if request fails.
+
+    Note:
+        Decorated with @retry for automatic retry on failure.
+    """
+    session = get_session()
+    try:
+        resp = session.get(
+            url,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-ZA,en;q=0.9",
+            },
+            timeout_seconds=45,
+        )
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            log(f"  PNet HTTP {resp.status_code} for {url[:80]}")
+            return None
+        return resp.text
+    except TypeError:
+        # requests session uses 'timeout' not 'timeout_seconds'
+        try:
+            resp = session.get(url, timeout=45)
+            if resp.status_code != 200:
+                return None
+            return resp.text
+        except Exception as e:
+            log(f"  PNet request error: {e}")
+            raise  # re-raise for retry
+    except Exception as e:
+        log(f"  PNet request error: {e}")
+        raise  # re-raise for retry
+
+
 def fetch_page(url: str) -> Optional[str]:
     """
     Fetch a page using the TLS session with retries.
 
     Args:
-        url: URL to fetch
+        url: URL to fetch.
 
     Returns:
-        HTML content as string, or None if request fails
+        HTML content as string, or None if request fails.
 
     Note:
-        Retries up to 3 times with session reset and exponential backoff.
+        Wrapper around _fetch_page_with_retry that catches the final failure
+        and returns None gracefully.
     """
-    max_retries = 3
-
-    for attempt in range(max_retries):
-        session = get_session()
-
-        try:
-            resp = session.get(
-                url,
-                headers={
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "en-ZA,en;q=0.9",
-                },
-                timeout_seconds=45,
-            )
-
-            if resp.status_code == 404:
-                return None
-            if resp.status_code != 200:
-                log(f"  PNet HTTP {resp.status_code} for {url[:80]}")
-                return None
-
-            return resp.text
-
-        except TypeError:
-            # requests session uses 'timeout' not 'timeout_seconds'
-            try:
-                resp = session.get(url, timeout=45)
-                if resp.status_code != 200:
-                    return None
-                return resp.text
-            except Exception as e:
-                log(f"  PNet request error (attempt {attempt + 1}/{max_retries}): {e}")
-
-        except Exception as e:
-            log(f"  PNet request error (attempt {attempt + 1}/{max_retries}): {e}")
-
-        if attempt < max_retries - 1:
-            wait = (attempt + 1) * 10  # 10s, then 20s
-            log(f"  Resetting session, retrying in {wait}s...")
-            reset_session()
-            time.sleep(wait)
-
-    return None
+    try:
+        return _fetch_page_with_retry(url)
+    except Exception as e:
+        log(f"  PNet page fetch failed after retries: {e}")
+        return None
 
 
 # ─── Helper Functions ──────────────────────────────────────────────────────
@@ -257,21 +295,37 @@ def parse_relative_date(time_posted: str) -> str:
     now = datetime.now()
     time_lower = time_posted.lower()
 
+    # Safe regex extraction
+    def safe_extract(pattern: str, text: str) -> Optional[str]:
+        try:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1)
+        except (AttributeError, IndexError):
+            pass
+        return None
+
     try:
         if "hour" in time_lower or "minute" in time_lower:
             return now.strftime("%Y-%m-%d")
 
         if "day" in time_lower:
-            days = int(re.search(r"(\d+)", time_lower).group(1))
-            return (now - timedelta(days=days)).strftime("%Y-%m-%d")
+            days_str = safe_extract(r"(\d+)", time_lower)
+            if days_str:
+                days = int(days_str)
+                return (now - timedelta(days=days)).strftime("%Y-%m-%d")
 
         if "week" in time_lower:
-            weeks = int(re.search(r"(\d+)", time_lower).group(1))
-            return (now - timedelta(weeks=weeks)).strftime("%Y-%m-%d")
+            weeks_str = safe_extract(r"(\d+)", time_lower)
+            if weeks_str:
+                weeks = int(weeks_str)
+                return (now - timedelta(weeks=weeks)).strftime("%Y-%m-%d")
 
         if "month" in time_lower:
-            months = int(re.search(r"(\d+)", time_lower).group(1))
-            return (now - timedelta(days=months * 30)).strftime("%Y-%m-%d")
+            months_str = safe_extract(r"(\d+)", time_lower)
+            if months_str:
+                months = int(months_str)
+                return (now - timedelta(days=months * 30)).strftime("%Y-%m-%d")
 
     except (ValueError, AttributeError):
         pass
@@ -292,13 +346,20 @@ def parse_listing_page(html: str, search_term: str) -> List[Dict[str, Any]]:
     Returns:
         List of job dictionaries with basic fields
     """
-    from datetime import timedelta
-
     soup = BeautifulSoup(html, "html.parser")
     jobs = []
 
-    # Find all job links (PNet pattern: /jobs--Title-Location-Company--ID-inline.html)
-    job_links = soup.find_all("a", href=re.compile(r"/jobs--.*--\d+-inline\.html"))
+    # ── Find job links using multiple selectors ──
+    job_links = []
+    for selector in JOB_LINK_SELECTORS:
+        job_links = soup.select(selector)
+        if job_links:
+            break
+
+    # Fallback: regex on all <a> tags
+    if not job_links:
+        job_links = soup.find_all("a", href=re.compile(r"/jobs--.*--\d+-inline\.html"))
+
     seen_urls: Set[str] = set()
 
     for link in job_links:
@@ -309,7 +370,7 @@ def parse_listing_page(html: str, search_term: str) -> List[Dict[str, Any]]:
 
         full_url = f"https://www.pnet.co.za{href}" if href.startswith("/") else href
 
-        # Walk up to find the card container
+        # ── Walk up to find the card container ──
         card = link
         for _ in range(5):
             parent = card.parent
@@ -322,7 +383,7 @@ def parse_listing_page(html: str, search_term: str) -> List[Dict[str, Any]]:
         lines = [l.strip() for l in card_text.split("\n") if l.strip()]
 
         # ── Title ──
-        title_el = card.find(["h2", "h3"])
+        title_el = card.find(["h2", "h3", "h4"])
         title = title_el.get_text(strip=True) if title_el else ""
         if not title and lines:
             title = lines[0]
@@ -444,142 +505,147 @@ def fetch_job_details(job: Dict[str, Any]) -> Dict[str, Any]:
         job: Basic job dictionary from listing page
 
     Returns:
-        Enriched job dictionary
+        Enriched job dictionary (or original on failure)
     """
     url = job.get("job_url", "")
     if not url:
         return job
 
-    html = fetch_page(url)
-    if not html:
-        return job
+    try:
+        html = fetch_page(url)
+        if not html:
+            return job
 
-    soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(separator="\n", strip=True)
+        soup = BeautifulSoup(html, "html.parser")
+        text = soup.get_text(separator="\n", strip=True)
 
-    # ── Company Name ──
-    # Method 1: Company link (/cmp/en/CompanyName-ID/work.html)
-    company_link = soup.find("a", href=re.compile(r"/cmp/en/"))
-    if company_link:
-        company_text = company_link.get_text(strip=True)
-        if company_text and len(company_text) < 100:
-            job["company"] = company_text
+        # ── Company Name ──
+        # Method 1: Company link (/cmp/en/CompanyName-ID/work.html)
+        company_link = soup.find("a", href=re.compile(r"/cmp/en/"))
+        if company_link:
+            company_text = company_link.get_text(strip=True)
+            if company_text and len(company_text) < 100:
+                job["company"] = company_text
 
-        href = company_link.get("href", "")
-        if href:
-            job["company_url"] = f"https://www.pnet.co.za{href}" if href.startswith("/") else href
+            href = company_link.get("href", "")
+            if href:
+                job["company_url"] = f"https://www.pnet.co.za{href}" if href.startswith("/") else href
 
-    # Method 2: Page title ("Job Title - Job with CompanyName in City")
-    if not job.get("company"):
+        # Method 2: Page title ("Job Title - Job with CompanyName in City")
+        if not job.get("company"):
+            title_tag = soup.find("title")
+            if title_tag:
+                match = re.search(r"\bwith\s+(.+?)\s+in\b", title_tag.get_text(strip=True), re.IGNORECASE)
+                if match:
+                    candidate = match.group(1).strip()
+                    if candidate and len(candidate) < 80:
+                        job["company"] = candidate
+
+        # Method 3: URL slug (/cmp/en/CompanyName-ID/work.html)
+        if not job.get("company") and job.get("company_url"):
+            match = re.search(r'/cmp/en/(.+?)(?:/|\?|$)', job["company_url"])
+            if match:
+                slug = re.sub(r'-\d+$', '', match.group(1)).replace('-', ' ').strip()
+                if slug:
+                    job["company"] = slug
+
+        # ── Company Logo ──
+        logo_img = soup.find("img", alt=re.compile(r"logo", re.I))
+        if logo_img:
+            src = logo_img.get("data-src") or logo_img.get("src", "")
+            if src and "gif;base64" not in src:
+                job["company_logo"] = src if src.startswith("http") else f"https://www.pnet.co.za{src}"
+
+        # ── Location from Title ──
         title_tag = soup.find("title")
         if title_tag:
-            match = re.search(r"\bwith\s+(.+?)\s+in\b", title_tag.get_text(strip=True), re.IGNORECASE)
+            title_text = title_tag.get_text(strip=True)
+            match = re.search(r" in (.+?)$", title_text)
             if match:
-                candidate = match.group(1).strip()
-                if candidate and len(candidate) < 80:
-                    job["company"] = candidate
+                job["location"] = match.group(1).strip()
+                job["city"] = extract_city(job["location"])
 
-    # Method 3: URL slug (/cmp/en/CompanyName-ID/work.html)
-    if not job.get("company") and job.get("company_url"):
-        match = re.search(r'/cmp/en/(.+?)(?:/|\?|$)', job["company_url"])
-        if match:
-            slug = re.sub(r'-\d+$', '', match.group(1)).replace('-', ' ').strip()
-            if slug:
-                job["company"] = slug
-
-    # ── Company Logo ──
-    logo_img = soup.find("img", alt=re.compile(r"logo", re.I))
-    if logo_img:
-        src = logo_img.get("data-src") or logo_img.get("src", "")
-        if src and "gif;base64" not in src:
-            job["company_logo"] = src if src.startswith("http") else f"https://www.pnet.co.za{src}"
-
-    # ── Location from Title ──
-    title_tag = soup.find("title")
-    if title_tag:
-        title_text = title_tag.get_text(strip=True)
-        match = re.search(r" in (.+?)$", title_text)
-        if match:
-            job["location"] = match.group(1).strip()
-            job["city"] = extract_city(job["location"])
-
-    # ── Full Description ──
-    desc_parts = []
-    for line in text.split("\n"):
-        line = line.strip()
-        if not line or len(line) < 15:
-            continue
-
-        # Skip navigation/footer content
-        skip_keywords = (
-            "sign in", "find jobs", "easy apply", "these jobs were popular",
-            "open map", "company benefits", "show more benefits",
-            "our location", "in short", "pnet is south africa",
-            "company profile", "slide number"
-        )
-        if any(kw in line.lower() for kw in skip_keywords):
-            continue
-
-        if len(line) > 30:
-            desc_parts.append(line)
-
-    if desc_parts:
-        full_desc = " ".join(desc_parts)
-        job["description_snippet"] = clean_text(full_desc, 3000)
-
-    # ── Industry ──
-    industry_match = re.search(r"\*\*Industry\*\*\s*(.+?)(?:\n|$)", text)
-    if not industry_match:
-        lines = text.split("\n")
-        for i, line in enumerate(lines):
-            if "Industry" in line and i + 1 < len(lines):
-                next_line = lines[i + 1].strip()
-                if next_line and len(next_line) < 60:
-                    job["company_industry"] = next_line
-                    break
-            if line.strip().startswith("Industry") and len(line.strip()) > 10:
-                job["company_industry"] = line.replace("Industry", "").strip()
-                break
-
-    # ── Company Size ──
-    for line in text.split("\n"):
-        if re.search(r"\d+-\d+\s*(employees|Employees)", line):
-            match = re.search(r"(\d[\d,]+-\d[\d,]+)", line)
-            if match:
-                job["company_size"] = match.group(1) + " employees"
-                break
-
-    # ── Company Description (About Us) ──
-    about_idx = text.lower().find("about us")
-    if about_idx > -1:
-        about_text = text[about_idx + 8:about_idx + 800].strip()
-        about_lines = []
-        for line in about_text.split("\n"):
+        # ── Full Description ──
+        desc_parts = []
+        for line in text.split("\n"):
             line = line.strip()
-            if not line:
+            if not line or len(line) < 15:
                 continue
-            if any(kw in line.lower() for kw in ["popular with", "these jobs", "pnet is south"]):
-                break
-            about_lines.append(line)
-        if about_lines:
-            job["company_description"] = clean_text(" ".join(about_lines), 300)
 
-    # ── Employment Type (Enhanced) ──
-    text_lower = text.lower()
-    if "permanent" in text_lower and not job["employment_type"]:
-        job["employment_type"] = "permanent"
-    elif "fixed term" in text_lower and not job["employment_type"]:
-        job["employment_type"] = "contract"
-    elif "contract" in text_lower and not job["employment_type"]:
-        job["employment_type"] = "contract"
+            # Skip navigation/footer content
+            skip_keywords = (
+                "sign in", "find jobs", "easy apply", "these jobs were popular",
+                "open map", "company benefits", "show more benefits",
+                "our location", "in short", "pnet is south africa",
+                "company profile", "slide number"
+            )
+            if any(kw in line.lower() for kw in skip_keywords):
+                continue
 
-    # ── Workplace Policy (Enhanced) ──
-    if not job["workplace_policy"]:
-        if "fully remote" in text_lower or "work from home" in text_lower:
-            job["workplace_policy"] = "remote"
-            job["is_remote"] = True
-        elif "hybrid" in text_lower or "partially remote" in text_lower:
-            job["workplace_policy"] = "hybrid"
+            if len(line) > 30:
+                desc_parts.append(line)
+
+        if desc_parts:
+            full_desc = " ".join(desc_parts)
+            job["description_snippet"] = clean_text(full_desc, 3000)
+
+        # ── Industry ──
+        industry_match = re.search(r"\*\*Industry\*\*\s*(.+?)(?:\n|$)", text)
+        if not industry_match:
+            lines = text.split("\n")
+            for i, line in enumerate(lines):
+                if "Industry" in line and i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    if next_line and len(next_line) < 60:
+                        job["company_industry"] = next_line
+                        break
+                if line.strip().startswith("Industry") and len(line.strip()) > 10:
+                    job["company_industry"] = line.replace("Industry", "").strip()
+                    break
+
+        # ── Company Size ──
+        for line in text.split("\n"):
+            if re.search(r"\d+-\d+\s*(employees|Employees)", line):
+                match = re.search(r"(\d[\d,]+-\d[\d,]+)", line)
+                if match:
+                    job["company_size"] = match.group(1) + " employees"
+                    break
+
+        # ── Company Description (About Us) ──
+        about_idx = text.lower().find("about us")
+        if about_idx > -1:
+            about_text = text[about_idx + 8:about_idx + 800].strip()
+            about_lines = []
+            for line in about_text.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                if any(kw in line.lower() for kw in ["popular with", "these jobs", "pnet is south"]):
+                    break
+                about_lines.append(line)
+            if about_lines:
+                job["company_description"] = clean_text(" ".join(about_lines), 300)
+
+        # ── Employment Type (Enhanced) ──
+        text_lower = text.lower()
+        if "permanent" in text_lower and not job["employment_type"]:
+            job["employment_type"] = "permanent"
+        elif "fixed term" in text_lower and not job["employment_type"]:
+            job["employment_type"] = "contract"
+        elif "contract" in text_lower and not job["employment_type"]:
+            job["employment_type"] = "contract"
+
+        # ── Workplace Policy (Enhanced) ──
+        if not job["workplace_policy"]:
+            if "fully remote" in text_lower or "work from home" in text_lower:
+                job["workplace_policy"] = "remote"
+                job["is_remote"] = True
+            elif "hybrid" in text_lower or "partially remote" in text_lower:
+                job["workplace_policy"] = "hybrid"
+
+    except Exception as e:
+        log(f"  Detail fetch error for {url[:60]}: {e}")
+        # Return original job unchanged
 
     return job
 
@@ -588,7 +654,7 @@ def fetch_job_details(job: Dict[str, Any]) -> Dict[str, Any]:
 
 def scrape_pnet_search(
     search_term: str,
-    max_pages: int = 100,
+    max_pages: int = MAX_PAGES,
     cutoff_days: int = 30
 ) -> List[Dict[str, Any]]:
     """
@@ -602,8 +668,6 @@ def scrape_pnet_search(
     Returns:
         List of job dictionaries from this search term
     """
-    from datetime import timedelta
-
     all_jobs = []
     page = 1
     seen_in_search: Set[str] = set()
@@ -661,7 +725,7 @@ def scrape_pnet_search(
 
 def scrape_pnet(
     search_terms: Optional[List[str]] = None,
-    max_pages: int = 100,
+    max_pages: int = MAX_PAGES,
     fetch_details: bool = True,
     cutoff_days: int = 30
 ) -> List[Dict[str, Any]]:
@@ -759,8 +823,8 @@ Note:
         help="Single search term (use hyphens: software-developer)"
     )
     parser.add_argument(
-        "--pages", "-p", type=int, default=100,
-        help="Safety ceiling: max pages per search term (default: 100)"
+        "--pages", "-p", type=int, default=MAX_PAGES,
+        help=f"Safety ceiling: max pages per search term (default: {MAX_PAGES})"
     )
     parser.add_argument(
         "--days", "-d", type=int, default=30,
