@@ -102,7 +102,8 @@ def _create_empty_jobspy_df():
 
 # ─── Test Cases ─────────────────────────────────────────────────────────────
 
-@patch('src.scrapers.indeed.scrape_jobs')
+# FIX: Patch 'jobspy.scrape_jobs' instead of 'src.scrapers.indeed.scrape_jobs'
+@patch('jobspy.scrape_jobs')
 def test_scrape_indeed_success(mock_scrape_jobs):
     """
     Test successful scraping with multiple job results.
@@ -154,7 +155,7 @@ def test_scrape_indeed_success(mock_scrape_jobs):
     assert job2["salary_max"] == 40000
 
 
-@patch('src.scrapers.indeed.scrape_jobs')
+@patch('jobspy.scrape_jobs')
 def test_scrape_indeed_empty(mock_scrape_jobs):
     """
     Test scraper handles empty JobSpy response.
@@ -171,7 +172,7 @@ def test_scrape_indeed_empty(mock_scrape_jobs):
     assert jobs == []
 
 
-@patch('src.scrapers.indeed.scrape_jobs')
+@patch('jobspy.scrape_jobs')
 def test_scrape_indeed_company_from_description(mock_scrape_jobs):
     """
     Test company name extraction from description when URL is missing.
@@ -220,7 +221,7 @@ def test_scrape_indeed_company_from_description(mock_scrape_jobs):
     assert jobs[0]["company"] == "Avbob"
 
 
-@patch('src.scrapers.indeed.scrape_jobs')
+@patch('jobspy.scrape_jobs')
 def test_scrape_indeed_company_unlisted(mock_scrape_jobs):
     """
     Test that 'company unlisted' is handled correctly.
@@ -268,7 +269,7 @@ def test_scrape_indeed_company_unlisted(mock_scrape_jobs):
     assert jobs[0]["company"] == ""
 
 
-@patch('src.scrapers.indeed.scrape_jobs')
+@patch('jobspy.scrape_jobs')
 def test_scrape_indeed_deduplication(mock_scrape_jobs):
     """
     Test that duplicate jobs (same URL) are removed.
@@ -318,7 +319,7 @@ def test_scrape_indeed_deduplication(mock_scrape_jobs):
     assert len(jobs) == 2
 
 
-@patch('src.scrapers.indeed.scrape_jobs')
+@patch('jobspy.scrape_jobs')
 def test_scrape_indeed_jobspy_error(mock_scrape_jobs):
     """
     Test scraper handles JobSpy exceptions gracefully.
@@ -340,7 +341,7 @@ def test_scrape_indeed_jobspy_error(mock_scrape_jobs):
     assert jobs == []
 
 
-@patch('src.scrapers.indeed.scrape_jobs')
+@patch('jobspy.scrape_jobs')
 def test_scrape_indeed_sorting(mock_scrape_jobs):
     """
     Test that jobs are sorted newest first.
