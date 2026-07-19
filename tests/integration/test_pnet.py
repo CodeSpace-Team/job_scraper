@@ -37,7 +37,7 @@ LISTING_HTML = """
         <div class="description">We are looking for a software engineer...</div>
         <div class="posted">2 days ago</div>
         <div>Full time, Permanent</div>
-        <div class="tags">Remote</div>
+        <div class="tags">fully remote</div>
     </div>
 </div>
 <div class="listing">
@@ -48,7 +48,7 @@ LISTING_HTML = """
         <div class="description">Data science role with Python...</div>
         <div class="posted">1 week ago</div>
         <div>Contract</div>
-        <div class="tags">Hybrid</div>
+        <div class="tags">hybrid</div>
     </div>
 </div>
 </body>
@@ -91,14 +91,15 @@ EMPTY_LISTING_HTML = """
 </html>
 """
 
-# HTML for a detail page with no company info
+# HTML for a detail page with no company info (and a long description)
 DETAIL_HTML_NO_COMPANY = """
 <html>
 <head>
     <title>Software Engineer - Job in Cape Town</title>
 </head>
 <body>
-    <p>Job description paragraph</p>
+    <p>This is the job description paragraph with enough text to be extracted by the scraper.</p>
+    <p>Second paragraph with more details.</p>
 </body>
 </html>
 """
@@ -140,7 +141,7 @@ def test_parse_listing_page_success():
     Test that the listing page parser extracts job cards correctly.
 
     Given:
-    - HTML with two job cards.
+    - HTML with two job cards (one remote, one hybrid).
 
     Expected:
     - Two job dictionaries with correct fields.
@@ -149,20 +150,20 @@ def test_parse_listing_page_success():
 
     assert len(jobs) == 2
 
-    # Verify first job
+    # Verify first job (remote)
     job1 = jobs[0]
     assert job1["title"] == "Software Engineer"
     assert job1["company"] == "Acme Corp"  # from img alt
     assert job1["location"] == "Cape Town, South Africa"
     assert job1["city"] == "Cape Town"
     assert job1["country"] == "South Africa"
-    assert job1["is_remote"] is True  # because "Remote" in tags
+    assert job1["is_remote"] is True  # because "fully remote" in tags
     assert job1["workplace_policy"] == "remote"
     assert job1["employment_type"] == "fulltime"  # "Full time, Permanent"
     assert job1["date_posted"] is not None  # date parsed from "2 days ago"
-    assert "full stack developer" in job1["primary_role"].lower()  # from search term
+    assert job1["primary_role"] == "Software Engineer"  # from search term title case
 
-    # Verify second job
+    # Verify second job (hybrid)
     job2 = jobs[1]
     assert job2["title"] == "Data Scientist"
     assert job2["company"] == "DataCorp"
@@ -197,28 +198,29 @@ def test_scrape_pnet_search_success(mock_sleep, mock_requests):
 
     Given:
     - Listing page 1 has 2 jobs.
-    - Listing page 2 has 1 more job.
+    - Listing page 2 has 1 new job (replaces one of the jobs).
     - Listing page 3 is empty (end of results).
 
     Expected:
-    - 3 jobs are returned.
+    - 3 jobs are returned (2 from page 1 + 1 from page 2).
     - Duplicates are handled.
     """
-    # Mock two listing pages
+    # Create a second page with a different job
     listing_page_2 = LISTING_HTML.replace("Software Engineer", "Senior Developer")
+    listing_page_2 = listing_page_2.replace("jobs--Software-Engineer-CapeTown--123-inline.html",
+                                            "jobs--Senior-Developer-Johannesburg--789-inline.html")
+
     _mock_listing_page(mock_requests, "software-engineer", page=1)
     _mock_listing_page(mock_requests, "software-engineer", page=2, html=listing_page_2)
     _mock_listing_page(mock_requests, "software-engineer", page=3, html=EMPTY_LISTING_HTML)
 
-    # Also need to mock detail pages if fetch_details=True, but default is True.
-    # For this test we only care about listing, we can call the function with fetch_details=False
-    # or we can mock all detail pages. We'll mock detail pages for the jobs found.
-    # Since we have 2+1=3 jobs, we need to mock three detail pages.
-    # We'll mock generic detail pages.
-    for i in range(1, 4):
-        _mock_detail_page(mock_requests, i)
+    # Mock detail pages for the jobs found (we'll mock a few)
+    # We'll mock 3 detail pages for the unique jobs
+    _mock_detail_page(mock_requests, 123)  # Software Engineer
+    _mock_detail_page(mock_requests, 456)  # Data Scientist
+    _mock_detail_page(mock_requests, 789)  # Senior Developer
 
-    # Disable detail fetching for this test to keep it fast.
+    # Disable detail fetching to keep it fast
     jobs = scrape_pnet(search_terms=["software-engineer"], fetch_details=False, max_pages=3)
 
     # Should have 3 jobs (2 from page 1, 1 from page 2)
@@ -261,24 +263,20 @@ def test_scrape_pnet_deduplication(mock_sleep, mock_requests):
     """
     # Page 1 has job1 and job2
     # Page 2 has job2 (duplicate) and job3
-    html_page_2 = LISTING_HTML.replace("Data Scientist", "Data Analyst")  # add new job
-    # We'll just simulate duplicates by returning the same job again (simplified)
-    # In the parser, duplicates are detected by URL, so we need the same URL.
-    # We'll return the same HTML but with a different job link? Actually, we can modify the mock to return the same job on page 2.
-    # But for simplicity, we'll just mock two pages with the same jobs? Deduplication is already tested in Indeed.
-    # We'll keep this test simple and rely on the dedup logic being tested elsewhere.
-    # We'll just verify that the scraper returns a list of jobs and we can check len.
+    # Create a modified version of LISTING_HTML with job2 removed and job3 added
+    # For simplicity, we'll just use the same HTML for both pages but with different URLs
+    # Actually, we'll mock page 1 and page 2 with same URLs (duplicates)
     _mock_listing_page(mock_requests, "software-engineer", page=1, html=LISTING_HTML)
     _mock_listing_page(mock_requests, "software-engineer", page=2, html=LISTING_HTML)  # same jobs
     _mock_listing_page(mock_requests, "software-engineer", page=3, html=EMPTY_LISTING_HTML)
 
-    # We need to mock detail pages for 2 jobs (since only 2 unique)
-    for i in range(1, 3):
-        _mock_detail_page(mock_requests, i)
+    # Mock detail pages for 2 jobs (since only 2 unique)
+    _mock_detail_page(mock_requests, 123)
+    _mock_detail_page(mock_requests, 456)
 
     jobs = scrape_pnet(search_terms=["software-engineer"], fetch_details=False, max_pages=3)
 
-    # Should only have 2 unique jobs (since page 2 had duplicates)
+    # Should have 2 unique jobs (since page 2 had duplicates)
     assert len(jobs) == 2
 
 
@@ -311,7 +309,7 @@ def test_fetch_job_details_success(mock_sleep, mock_requests):
     assert enriched_job["company"] == "Acme Corp"
     assert enriched_job["company_url"].startswith("https://www.pnet.co.za/cmp/en/")
     assert enriched_job["company_logo"] == "https://example.com/logo.png"
-    assert enriched_job["description_snippet"] is not None
+    assert "Job description paragraph" in enriched_job["description_snippet"]
     assert enriched_job["company_industry"] == "Technology"
     assert enriched_job["company_size"] == "100-200 employees"
     assert "Acme Corp" in enriched_job["company_description"]
@@ -324,10 +322,12 @@ def test_fetch_job_details_missing_company(mock_sleep, mock_requests):
 
     Given:
     - Detail page without company name or logo.
+    - But it has a long description.
 
     Expected:
     - Job retains original fields.
     - No exception raised.
+    - Description snippet is extracted from the page.
     """
     job = {
         "job_url": "https://www.pnet.co.za/jobs--Software-Engineer-CapeTown--123-inline.html",
@@ -345,7 +345,7 @@ def test_fetch_job_details_missing_company(mock_sleep, mock_requests):
     assert enriched_job["company"] == "Unknown"  # not overwritten
     assert enriched_job.get("company_logo", "") == ""
     # Description snippet should be updated from the detail page
-    assert "Job description paragraph" in enriched_job["description_snippet"]
+    assert "This is the job description paragraph" in enriched_job["description_snippet"]
 
 
 @patch('src.scrapers.pnet.time.sleep')
@@ -391,18 +391,13 @@ def test_scrape_pnet_full_integration(mock_sleep, mock_requests):
         _mock_listing_page(mock_requests, term, page=1, html=LISTING_HTML)
         _mock_listing_page(mock_requests, term, page=2, html=EMPTY_LISTING_HTML)
 
-    # Mock detail pages for each job (assuming 4 unique jobs)
-    # Since there are 2 jobs per listing, and we have 2 terms, we might have duplicates.
-    # For simplicity, we'll just mock many detail pages.
-    for i in range(1, 5):
+    # Mock detail pages for each job (assuming 2 unique jobs per term)
+    # We'll mock detail pages for IDs 123, 456 (from the HTML)
+    for i in [123, 456]:
         _mock_detail_page(mock_requests, i)
 
-    # We also need to mock detail pages for the additional jobs if any.
-    # We'll just mock 5 pages to be safe.
     jobs = scrape_pnet(search_terms=["software-engineer", "full-stack-developer"], fetch_details=True, max_pages=2)
 
-    # Should have 4 unique jobs (2 per term, but could have duplicate URLs)
-    # Since we used same HTML for both terms, there will be duplicates.
-    # Actually, the HTML has the same job URLs, so deduplication will reduce count.
-    # We'll set a reasonable expectation: at least 2 unique.
-    assert len(jobs) >= 2
+    # Since both terms use the same listing HTML, we'll have duplicates.
+    # The dedup should reduce to 2 unique jobs.
+    assert len(jobs) == 2
