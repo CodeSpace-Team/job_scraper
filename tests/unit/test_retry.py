@@ -11,7 +11,7 @@ import pytest
 from src.utils.retry import retry
 
 
-class TestException(Exception):
+class RetryTestError(Exception):
     """Custom exception for testing retries."""
     pass
 
@@ -20,7 +20,7 @@ def test_retry_success_first():
     """Function should succeed on first attempt."""
     call_count = 0
 
-    @retry(exceptions=(TestException,), tries=3)
+    @retry(exceptions=(RetryTestError,), tries=3)
     def successful():
         nonlocal call_count
         call_count += 1
@@ -35,12 +35,12 @@ def test_retry_after_failure():
     """Function succeeds after two failures."""
     call_count = 0
 
-    @retry(exceptions=(TestException,), tries=3, delay=0.01)
+    @retry(exceptions=(RetryTestError,), tries=3, delay=0.01)
     def eventually_succeeds():
         nonlocal call_count
         call_count += 1
         if call_count < 3:
-            raise TestException("retry me")
+            raise RetryTestError("retry me")
         return "ok"
 
     result = eventually_succeeds()
@@ -52,13 +52,13 @@ def test_retry_exhausted():
     """All retries fail, exception is raised."""
     call_count = 0
 
-    @retry(exceptions=(TestException,), tries=3, delay=0.01)
+    @retry(exceptions=(RetryTestError,), tries=3, delay=0.01)
     def always_fails():
         nonlocal call_count
         call_count += 1
-        raise TestException("fail")
+        raise RetryTestError("fail")
 
-    with pytest.raises(TestException):
+    with pytest.raises(RetryTestError):
         always_fails()
     assert call_count == 3
 
