@@ -1,4 +1,3 @@
-#!/bin/bash
 ##############################################################################
 # Job Scraper Pipeline - One Command to Rule Them All                        #
 ##############################################################################
@@ -7,56 +6,141 @@
 #   Run the complete job scraping pipeline and generate:
 #   - A combined CSV file with all jobs from OfferZen, Indeed, and PNet.
 #   - A summary (job counts & sample titles) printed in the terminal.
+#   - Optionally run tests before the pipeline to ensure code quality.
 #
-# First activate the virtual environment (venv) before running the commands.
+# ─── PREREQUISITES ──────────────────────────────────────────────────────────
 #
-# USAGE:
-# 1. Make it executable (first time only)
-#    chmod +x run.sh
+#   First activate the virtual environment:
+#     source venv/bin/activate   # Linux/Mac
+#     venv\Scripts\activate      # Windows
 #
-# 2. Run by using the command below
-#    ./run.sh                    # Run with default settings (skip LinkedIn)
-#    ./run.sh --skip-pnet        # Skip PNet (faster runs, ~2 min)
-#    ./run.sh --skip-enrichment  # Skip AI enrichment (faster, no Claude API)
-#    ./run.sh --skip-indeed      # Skip Indeed
-#    ./run.sh --skip-offerzen    # Skip OfferZen
+#   Make the script executable (first time only):
+#     chmod +x run.sh
 #
-# OPTIONS:
+# ─── USAGE ──────────────────────────────────────────────────────────────────
+#
+#   ./run.sh                    # Run with default settings (skip LinkedIn)
+#   ./run.sh --skip-pnet        # Skip PNet (faster runs, ~2 min)
+#   ./run.sh --skip-enrichment  # Skip AI enrichment (faster, no Claude API)
+#   ./run.sh --skip-indeed      # Skip Indeed
+#   ./run.sh --skip-offerzen    # Skip OfferZen
+#   ./run.sh --scraper-only     # Only run scrapers, skip enrichment & sheets
+#
+# ─── TESTING OPTIONS ──────────────────────────────────────────────────────
+#
+#   ./run.sh --test             # Run all tests (unit + integration) before pipeline
+#   ./run.sh --unit             # Run only unit tests before pipeline
+#   ./run.sh --integration      # Run only integration tests before pipeline
+#   ./run.sh --test --skip-pnet # Run tests, then pipeline (skipping PNet)
+#
+# ─── OPTIONS ───────────────────────────────────────────────────────────────
+#
 #   --skip-pnet         Skip PNet scraper (saves ~6-8 minutes)
 #   --skip-enrichment   Skip AI enrichment (saves ~1-2 minutes)
 #   --skip-indeed       Skip Indeed scraper
 #   --skip-offerzen     Skip OfferZen scraper
 #   --skip-linkedin     Skip LinkedIn (default, LinkedIn is disabled)
 #   --scraper-only      Only run scrapers, skip enrichment and sheets
+#   --test              Run all tests (unit + integration) before pipeline
+#   --unit              Run only unit tests before pipeline
+#   --integration       Run only integration tests before pipeline
 #
-# OUTPUT:
+# ─── OUTPUT ────────────────────────────────────────────────────────────────
+#
 #   - Individual JSON files: data/cache/{source}_jobs.json
 #   - Combined CSV: data/cache/all_jobs.csv
 #   - Terminal summary: job counts & sample titles per source
 #
-# DEPENDENCIES:
+# ─── DEPENDENCIES ──────────────────────────────────────────────────────────
+#
 #   - Python 3.11+ with all required packages
 #   - pandas (for CSV generation)
+#   - pytest (for testing)
 #   - Active virtual environment (venv)
 #
-# EXAMPLES:
-#   # Quick test run (only OfferZen + Indeed, ~2 min)
-#   ./run.sh --skip-pnet
+# ─── EXAMPLES ──────────────────────────────────────────────────────────────
 #
-#   # Full run with all scrapers (10-12 min)
-#   ./run.sh
+#   # Run tests, then full pipeline
+#   ./run.sh --test
 #
-#   # Scraper-only mode (no sheets, no AI)
-#   ./run.sh --scraper-only --skip-pnet
+#   # Run only unit tests, then pipeline (skipping PNet for speed)
+#   ./run.sh --unit --skip-pnet
+#
+#   # Run integration tests only, then pipeline
+#   ./run.sh --integration --skip-linkedin
+#
+#   # Run all tests, then full pipeline (skip PNet for speed)
+#   ./run.sh --test --skip-pnet
+#
+#   # Scraper-only mode with tests
+#   ./run.sh --test --scraper-only --skip-pnet
 #
 ##############################################################################
+
+# ─── Parse flags ──────────────────────────────────────────────────────────────
+
+RUN_TESTS=false
+TEST_TYPE="all"  # all, unit, integration
+PIPELINE_ARGS=""
+
+for arg in "$@"; do
+    case $arg in
+        --test)
+            RUN_TESTS=true
+            TEST_TYPE="all"
+            ;;
+        --unit)
+            RUN_TESTS=true
+            TEST_TYPE="unit"
+            ;;
+        --integration)
+            RUN_TESTS=true
+            TEST_TYPE="integration"
+            ;;
+        *)
+            PIPELINE_ARGS="$PIPELINE_ARGS $arg"
+            ;;
+    esac
+done
+
+# ─── Run tests (if requested) ────────────────────────────────────────────────
+
+if [ "$RUN_TESTS" = true ]; then
+    echo "🧪 Running tests before pipeline..."
+    echo ""
+
+    case $TEST_TYPE in
+        unit)
+            echo "🔬 Running unit tests..."
+            pytest tests/unit/ -v
+            ;;
+        integration)
+            echo "🔗 Running integration tests..."
+            pytest tests/integration/ -v
+            ;;
+        all)
+            echo "🔬🔗 Running all tests (unit + integration)..."
+            pytest tests/ -v
+            ;;
+    esac
+
+    if [ $? -ne 0 ]; then
+        echo "❌ Tests failed. Pipeline aborted."
+        exit 1
+    fi
+
+    echo "✅ All tests passed!"
+    echo ""
+fi
+
+# ─── Run pipeline ─────────────────────────────────────────────────────────────
 
 echo "🚀 Running job scraper pipeline..."
 echo "📂 Working directory: $(pwd)"
 echo ""
 
 # Run the main pipeline
-python -m src.main --spreadsheet-id DUMMY --skip-linkedin --skip-enrichment "$@"
+python -m src.main --spreadsheet-id DUMMY --skip-linkedin --skip-enrichment $PIPELINE_ARGS
 
 # Check if pipeline succeeded
 if [ $? -ne 0 ]; then
