@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 enhancer.py — AI-powered job enrichment via Anthropic Claude API
 =================================================================
@@ -67,14 +68,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-try:
-    import anthropic
-except ImportError:
-    print("ERROR: anthropic library not installed. Run: pip install anthropic")
-    sys.exit(1)
-
 # ─── Direct imports from modules to avoid missing exports ────────────────
-from src.utils import log, retry
 from src.utils import log, retry, load_jobs, save_jobs
 
 
@@ -205,7 +199,7 @@ def _parse_response(response_text: str) -> List[Dict[str, Any]]:
     backoff=2.0
 )
 def _call_claude_api(
-    client: anthropic.Anthropic,
+    client: 'anthropic.Anthropic',  # type: ignore
     prompt: str
 ) -> str:
     """
@@ -259,6 +253,8 @@ def enrich_batch(
         Sleeps 1.5 seconds between batches to stay under
         Anthropic's ~60 requests/minute limit.
     """
+    # Lazy import: only import anthropic when this function is called
+    import anthropic
     client = anthropic.Anthropic(api_key=api_key)
     enriched = []
 

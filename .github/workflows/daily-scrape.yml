@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install python-jobspy pandas requests anthropic gspread oauth2client
+          pip install python-jobspy pandas requests anthropic gspread oauth2client beautifulsoup4 tls-client
       
       - name: Run scraping pipeline
         env:
@@ -46,11 +46,11 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: |
           # Base command - skip LinkedIn by default
-          CMD="python main_scraper.py --spreadsheet-id $SPREADSHEET_ID --skip-linkedin"
+          CMD="python -m src.main --spreadsheet-id $SPREADSHEET_ID --skip-linkedin"
           
           # Only for manual runs: allow user to include LinkedIn
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.skip_linkedin }}" = "false" ]; then
-            CMD="python main_scraper.py --spreadsheet-id $SPREADSHEET_ID"
+            CMD="python -m src.main --spreadsheet-id $SPREADSHEET_ID"
             echo "Manual run: INCLUDING LinkedIn"
           fi
           
@@ -68,7 +68,7 @@ jobs:
         with:
           name: job-data-${{ github.run_number }}
           path: |
-            *.json
+            data/cache/*.json
           retention-days: 7
       
       - name: Notify on failure
