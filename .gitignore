@@ -44,4 +44,4 @@ combined_jobs*.json
 # Distribution / packaging
 build/
 dist/
-*.egg-info/
+*.egg-info/.coverage
