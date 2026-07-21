@@ -45,12 +45,12 @@ jobs:
           GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: |
-          # Base command - skip LinkedIn by default
-          CMD="python -m src.main --spreadsheet-id $SPREADSHEET_ID --skip-linkedin"
+          # Base command - skip LinkedIn and PNet by default
+          CMD="python -m src.main --spreadsheet-id $SPREADSHEET_ID --skip-linkedin --skip-pnet"
           
           # Only for manual runs: allow user to include LinkedIn
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.skip_linkedin }}" = "false" ]; then
-            CMD="python -m src.main --spreadsheet-id $SPREADSHEET_ID"
+            CMD="python -m src.main --spreadsheet-id $SPREADSHEET_ID --skip-pnet"
             echo "Manual run: INCLUDING LinkedIn"
           fi
           
