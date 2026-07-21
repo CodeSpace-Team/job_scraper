@@ -1,0 +1,2 @@
+[console_scripts]
+job-scraper = src.main:main

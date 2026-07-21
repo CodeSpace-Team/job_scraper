@@ -1,0 +1,337 @@
+Metadata-Version: 2.4
+Name: job-scraper
+Version: 0.2.0
+Summary: Daily South African tech job aggregator for CodeSpace graduates
+Author-email: Monde nel <mondelnel1996@gmail.com>
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: requests>=2.31.0
+Requires-Dist: beautifulsoup4>=4.12.0
+Requires-Dist: tls-client>=0.3.0
+Requires-Dist: python-jobspy>=1.1.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: gspread>=6.0.0
+Requires-Dist: oauth2client>=4.1.3
+Requires-Dist: anthropic>=0.40.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=5.0.0; extra == "dev"
+Requires-Dist: pytest-vcr>=1.0.0; extra == "dev"
+Requires-Dist: requests-mock>=1.11.0; extra == "dev"
+Requires-Dist: mypy>=1.8.0; extra == "dev"
+Requires-Dist: black>=24.0.0; extra == "dev"
+Requires-Dist: isort>=5.13.0; extra == "dev"
+Requires-Dist: ruff>=0.3.0; extra == "dev"
+Requires-Dist: pre-commit>=3.6.0; extra == "dev"
+
+# South African Tech Job Aggregator
+
+Automated daily job scraping pipeline that collects software development jobs from multiple South African job boards and publishes them to a public Google Sheet for CodeSpace graduates.
+
+## Overview
+
+This system automatically scrapes tech jobs from OfferZen, Indeed, PNet, and (optionally) LinkedIn, enriches them with AI-extracted metadata, and publishes the results to a Google Sheet that updates daily at 8 AM SAST.
+
+**Live Sheet:** [View Current Jobs](https://docs.google.com/spreadsheets/d/1TPn_2Q-01Bx9rAzOp_nYt5sltHQWObjtKnxe9T73SOM)
+
+## Architecture
+
+### Components
+
+1. **Scrapers** - Individual Python modules for each job source
+2. **Enrichment** - Claude AI extracts skills, experience levels, and summaries
+3. **Sheet Writer** - Publishes to Google Sheets with deduplication
+4. **GitHub Actions** - Runs the entire pipeline automatically every day
+
+### Data Flow
+
+```
+OfferZen API     →
+Indeed (JobSpy)  →  Scrape  →  Enrich with AI  →  Deduplicate  →  Google Sheet
+PNet (JobSpy)    →                                                   (Append Only)
+LinkedIn*        →
+```
+
+*LinkedIn scraping is currently disabled due to aggressive rate limiting. See "LinkedIn Status" section below.
+
+## Features
+
+- **Automatic daily updates** at 8 AM SAST via GitHub Actions
+- **Multi-source aggregation** from 3 active job boards
+- **AI enrichment** extracts:
+  - Normalized role categories (Backend Engineer, Data Scientist, etc.)
+  - Required and nice-to-have skills
+  - Experience level (Junior, Mid, Senior, Lead, Principal)
+  - One-sentence job summary
+- **Smart deduplication** by job URL prevents duplicate listings
+- **Append-only updates** preserve historical data
+- **Public Google Sheet** with filtering and sorting capabilities
+
+## File Structure
+
+```
+job-scraper/
+├── .github/
+│   └── workflows/
+│       └── daily-scrape.yml       # GitHub Actions workflow
+├── main_scraper.py                # Main orchestrator
+├── scraper_utils.py               # Shared utilities
+├── enrich_jobs.py                 # AI enrichment via Claude API
+├── sheets_writer.py               # Google Sheets integration
+├── offerzen_scraper.py           # OfferZen API scraper
+├── indeed_scraper.py             # Indeed scraper (via JobSpy)
+├── linkedin_scraper_enhanced.py  # LinkedIn scraper (currently disabled)
+├── pnet_scraper.py               # PNet scraper (via JobSpy)
+├── requirements.txt              # Python dependencies
+└── .gitignore                    # Git exclusions
+```
+
+## How It Works
+
+### Daily Automated Run
+
+Every day at 6:00 AM UTC (8:00 AM SAST), GitHub Actions executes the following pipeline:
+
+1. **Scraping Phase**
+   - OfferZen: Fetches jobs from public API (~220 jobs)
+   - Indeed: Searches 5 job titles via JobSpy (~400 jobs)
+   - PNet: Searches tech roles via JobSpy (~200 jobs)
+   - Total: ~800 jobs collected
+
+2. **Enrichment Phase**
+   - Sends job descriptions to Claude AI (Haiku model)
+   - Processes in batches of 5 jobs
+   - Extracts structured metadata for each job
+   - Cost: ~$0.08 per run
+
+3. **Publishing Phase**
+   - Reads existing jobs from Google Sheet
+   - Compares new jobs by URL to detect duplicates
+   - Appends only new jobs (typically 30-50 per day)
+   - Applies formatting and sorting
+
+### Google Sheet Structure
+
+The published sheet contains these columns:
+
+- **Date Posted** - YYYY-MM-DD format
+- **Job Title** - As posted by employer
+- **Company** - Employer name
+- **Role Category** - AI-normalized (e.g., "Full Stack Developer")
+- **Location** - City and province
+- **Work Policy** - Remote, Hybrid, or Office
+- **Required Skills** - Bullet list of must-have technical skills
+- **Nice-to-Have Skills** - Bullet list of preferred skills
+- **Years Experience** - Required experience (integer)
+- **Level** - Junior, Mid, Senior, Lead, or Principal
+- **Employment Type** - Full-time, Contract, etc.
+- **Salary Range** - If disclosed
+- **Summary** - AI-generated one-sentence description
+- **Source** - OfferZen, Indeed, or PNet
+- **Apply Link** - Direct URL to job posting
+
+## LinkedIn Status
+
+LinkedIn scraping is currently **disabled by default** in the automated workflow for the following reasons:
+
+1. **Aggressive Rate Limiting** - LinkedIn actively blocks automated scrapers
+2. **Account Risks** - High probability of account suspension
+3. **Sufficient Coverage** - Other sources provide 700+ jobs daily
+
+### Enabling LinkedIn (Not Recommended)
+
+If you choose to enable LinkedIn scraping:
+
+1. Create a dedicated LinkedIn account (never use your personal account)
+2. Complete the profile thoroughly with realistic information
+3. Build organic connections (50+ people) over 2 weeks
+4. Age the account for 2-3 weeks before scraping
+5. Start with very low volume (50 results per term)
+6. Monitor for rate limit warnings
+
+To enable in GitHub Actions, edit `.github/workflows/daily-scrape.yml`:
+
+```yaml
+# Change this line:
+CMD="python main_scraper.py --spreadsheet-id $SPREADSHEET_ID --skip-linkedin"
+
+# To this:
+CMD="python main_scraper.py --spreadsheet-id $SPREADSHEET_ID"
+```
+
+**We strongly recommend leaving LinkedIn disabled.** The current three sources provide ample job coverage without the associated risks.
+
+## Setup
+
+### Prerequisites
+
+- GitHub account (private repository)
+- Google Cloud Platform account
+- Anthropic API key
+- Python 3.11+ (for local testing)
+
+### Google Cloud Setup
+
+1. Create a new Google Cloud project
+2. Enable the Google Sheets API
+3. Create a service account:
+   - Go to APIs & Services > Credentials
+   - Create Credentials > Service Account
+   - Download the JSON key file
+4. Create a Google Sheet and share it with the service account email (Editor permission)
+
+### GitHub Configuration
+
+1. Fork or clone this repository (keep it private)
+2. Add repository secrets (Settings > Secrets > Actions):
+   - `ANTHROPIC_API_KEY` - Your Claude API key
+   - `GOOGLE_SHEETS_CREDS` - Entire JSON contents from service account key
+   - `SPREADSHEET_ID` - Google Sheet ID from the URL
+
+### Local Testing
+
+```bash
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set environment variables
+export ANTHROPIC_API_KEY="your-key"
+export GOOGLE_SHEETS_CREDS='{"type":"service_account",...}'
+export SPREADSHEET_ID="your-sheet-id"
+
+# Run pipeline (without LinkedIn)
+python main_scraper.py --spreadsheet-id $SPREADSHEET_ID --skip-linkedin
+```
+
+## Configuration
+
+### Workflow Schedule
+
+Edit `.github/workflows/daily-scrape.yml` to change the schedule:
+
+```yaml
+on:
+  schedule:
+    - cron: '0 6 * * *'  # 6 AM UTC = 8 AM SAST
+```
+
+### Scraper Parameters
+
+Adjust scraping volume in `main_scraper.py`:
+
+- `--indeed-results` - Jobs per Indeed search term (default: 100)
+- `--linkedin-results` - Jobs per LinkedIn search term (default: 200, currently unused)
+
+### Enrichment Batch Size
+
+Modify `batch_size` parameter in `main_scraper.py`:
+
+```python
+enriched_jobs = enrich_jobs.enrich_batch(
+    all_jobs,
+    api_key,
+    batch_size=10  # Increase for faster processing (default: 5)
+)
+```
+
+Larger batches are faster but slightly less accurate.
+
+## Cost Analysis
+
+### GitHub Actions
+- **Free tier:** 2,000 minutes/month (private repos)
+- **Usage:** ~240 minutes/month (8 min/day × 30 days)
+- **Utilization:** 12% of free quota
+- **Cost:** $0
+
+### Anthropic API (Claude)
+- **Model:** Claude Haiku 4.5
+- **Usage:** ~350,000 tokens/day
+- **Rate:** ~$0.25 per million input tokens
+- **Cost:** ~$0.08/day = ~$2.40/month
+
+### Google Sheets API
+- **Free tier:** Unlimited reads/writes
+- **Cost:** $0
+
+**Total Monthly Cost:** ~$2.40
+
+## Monitoring
+
+### GitHub Actions
+
+View workflow runs at: `https://github.com/YOUR_USERNAME/job_scraper/actions`
+
+- Green checkmark = successful run
+- Red X = failed run (click for logs)
+
+### Common Issues
+
+**"No jobs scraped from any source"**
+- Check scraper error messages in logs
+- JobSpy library may need updating: `pip install --upgrade python-jobspy`
+
+**"Error opening spreadsheet"**
+- Verify service account has Editor access to sheet
+- Check `GOOGLE_SHEETS_CREDS` is complete JSON
+- Confirm `SPREADSHEET_ID` is correct
+
+**"ANTHROPIC_API_KEY not set"**
+- Verify secret is added in GitHub repository settings
+- Check secret name matches exactly (case-sensitive)
+
+**Enrichment fails mid-run**
+- API rate limit reached (unlikely with current volume)
+- Temporary Anthropic service issue
+- Run will continue with un-enriched jobs
+
+## Maintenance
+
+### Weekly Tasks
+- Verify GitHub Actions runs are successful
+- Spot-check Google Sheet for data quality
+- Monitor job counts (sudden drops indicate scraper issues)
+
+### Monthly Tasks
+- Review Anthropic API costs
+- Check for JobSpy library updates
+- Verify sheet row count (consider archiving old jobs if >2,000 rows)
+
+### Updating Dependencies
+
+```bash
+pip install --upgrade python-jobspy pandas anthropic gspread
+pip freeze > requirements.txt
+git add requirements.txt
+git commit -m "Update dependencies"
+git push
+```
+
+## Data Privacy and Ethics
+
+- All scraped data is publicly available job postings
+- No personal information is collected or stored
+- Service complies with job board terms of service
+- OfferZen uses public API; JobSpy uses standard web scraping
+- LinkedIn scraping is disabled to avoid TOS violations
+
+## License
+
+This project is intended for educational and job-search purposes for CodeSpace graduates. Not for commercial redistribution.
+
+## Support
+
+For issues or questions:
+1. Check GitHub Actions logs for error details
+2. Review this README's troubleshooting section
+3. Examine individual scraper logs
+4. Verify all secrets are configured correctly
+
+---
+
+**Maintained for CodeSpace graduates seeking software development opportunities in South Africa.**
