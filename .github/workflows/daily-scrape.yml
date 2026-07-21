@@ -45,6 +45,9 @@ jobs:
           GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: |
+          # Ensure Python can find the src module
+          export PYTHONPATH="${PYTHONPATH}:."
+          
           # Base command - skip LinkedIn and PNet by default
           CMD="python -m src.main --spreadsheet-id $SPREADSHEET_ID --skip-linkedin --skip-pnet"
           
