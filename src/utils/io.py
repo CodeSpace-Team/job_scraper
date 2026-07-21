@@ -39,6 +39,7 @@ def load_jobs(path: Path) -> List[Dict[str, Any]]:
 def save_jobs(jobs, output_file, write_csv=False, source_name=""):
     """Save jobs to JSON and optionally CSV."""
     output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump({"jobs": jobs}, f, indent=2, ensure_ascii=False)
