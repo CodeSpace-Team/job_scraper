@@ -39,6 +39,9 @@ jobs:
           pip install --upgrade pip
           pip install python-jobspy pandas requests anthropic gspread oauth2client beautifulsoup4 tls-client
       
+      - name: Create data directory
+        run: mkdir -p data/cache
+      
       - name: Run scraping pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
