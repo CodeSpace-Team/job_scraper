@@ -15,7 +15,7 @@ on:
         description: 'Skip AI enrichment'
         required: false
         type: boolean
-        default: true  # 👈 Now default true
+        default: true
 
 jobs:
   scrape-and-publish:
@@ -39,6 +39,18 @@ jobs:
       
       - name: Create data directory
         run: mkdir -p data/cache
+
+      # ─── Debug: Check if GOOGLE_SHEETS_CREDS is set ────────────────────
+      - name: Debug - Check Google Sheets credentials
+        env:
+          GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
+        run: |
+          if [ -z "$GOOGLE_SHEETS_CREDS" ]; then
+            echo "::error::GOOGLE_SHEETS_CREDS is empty or not set"
+            exit 1
+          else
+            echo "✅ GOOGLE_SHEETS_CREDS is set (length: ${#GOOGLE_SHEETS_CREDS})"
+          fi
       
       - name: Run scraping pipeline
         env:
@@ -48,19 +60,22 @@ jobs:
         run: |
           export PYTHONPATH="${PYTHONPATH}:."
           
-          # Base command - skip LinkedIn, PNet, and Enrichment by default
-          CMD="python -m src.main --spreadsheet-id $SPREADSHEET_ID --skip-linkedin --skip-pnet --skip-enrichment"
+          # ─── Build command from scratch ────────────────────────────────
+          CMD="python -m src.main --spreadsheet-id $SPREADSHEET_ID"
           
-          # Only for manual runs: allow user to include LinkedIn
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.skip_linkedin }}" = "false" ]; then
-            CMD="python -m src.main --spreadsheet-id $SPREADSHEET_ID --skip-pnet --skip-enrichment"
-            echo "Manual run: INCLUDING LinkedIn"
+          # Always skip LinkedIn and PNet
+          CMD="$CMD --skip-linkedin --skip-pnet"
+          
+          # Skip enrichment by default (unless manually overridden)
+          if [ "${{ github.event.inputs.skip_enrichment }}" != "false" ]; then
+            CMD="$CMD --skip-enrichment"
           fi
           
-          # Allow user to enable enrichment (if they have credits)
-          if [ "${{ github.event.inputs.skip_enrichment }}" = "false" ]; then
-            CMD="$CMD"  # Remove --skip-enrichment (it's already there, so we can't remove easily)
-            # Alternative: rebuild the command without --skip-enrichment
+          # Manual override: allow LinkedIn only if explicitly requested
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.skip_linkedin }}" = "false" ]; then
+            # Remove --skip-linkedin from the command
+            CMD="${CMD/ --skip-linkedin/}"
+            echo "Manual run: INCLUDING LinkedIn"
           fi
           
           echo "Running: $CMD"
