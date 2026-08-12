@@ -4,8 +4,9 @@ orchestrator.py — Pipeline orchestration for daily job scraping
 Runs the complete pipeline:
   1. Scrape jobs from all sources (OfferZen, Indeed, LinkedIn, PNet)
   2. Enrich with AI (extract skills, levels, blurbs)
-  3. Screen out non-tech jobs, keeping the drops with their reasons (F1)
-  4. Write to Google Sheets (sorted, deduplicated)
+  3. Work out each job's level and years of experience (F2, F3)
+  4. Screen out non-tech jobs, keeping the drops with their reasons (F1)
+  5. Write to Google Sheets (sorted, deduplicated)
 
 Designed for GitHub Actions daily runs.
 
@@ -31,7 +32,7 @@ except ImportError:
     HAS_PNET = False
 
 from src.enrichment import enhancer
-from src.pipeline import screening
+from src.pipeline import experience, levels, screening
 from src.writers import sheets
 from src.utils import log, save_jobs
 
@@ -160,6 +161,21 @@ def main() -> None:
                 log("  Continuing with un-enriched jobs...")
     else:
         log("\n[PHASE 2] ENRICHMENT SKIPPED (--skip-enrichment flag)")
+
+        # ── PHASE 2.4: LEVELS AND YEARS (F2, F3) ─────────────────────────────────
+    # Runs after enrichment so the rules get the last word over the AI, and
+    # before screening because F4 will decide what to drop from these fields.
+
+    log("\n[PHASE 2.4] WORKING OUT LEVELS AND YEARS OF EXPERIENCE...")
+
+    all_jobs = experience.apply_experience(all_jobs)
+    all_jobs = levels.apply_levels(all_jobs)
+
+    experience.log_experience(all_jobs)
+    levels.log_levels(all_jobs)
+
+    save_jobs(all_jobs, "data/cache/combined_jobs_leveled.json")
+
 
     # ── PHASE 2.5: SCREENING (F1) ────────────────────────────────────────────
 
