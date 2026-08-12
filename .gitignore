@@ -44,4 +44,14 @@ combined_jobs*.json
 # Distribution / packaging
 build/
 dist/
-*.egg-info/.coverage
+*.egg-info/
+
+# Test artefacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# Scraped data. The QA review sheets under data/qa/ are deliberately NOT
+# ignored -- they are the written record of the weekly level check.
+data/cache/
