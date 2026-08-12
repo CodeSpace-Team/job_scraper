@@ -99,6 +99,26 @@ HEADERS: List[str] = [
     "Apply Link",
 ]
 
+EXCLUDE_HEADERS: List[str] = [
+    "Date Excluded",
+    "Stage",
+    "Reason",
+    "Job Title",
+    "Company",
+    "Role Label",
+    "Location",
+    "Source",
+    "Apply Link",
+    "Description",
+]
+"""
+Columns for the Exclude tab (F1).
+
+The role label and the description are carried deliberately: the brief wants
+the dropped rows to be usable later as training data for what to exclude, and
+neither is recoverable once the job is gone.
+"""
+
 SHEET_SCOPES: List[str] = [
     'https://spreadsheets.google.com/feeds',
     'https://www.googleapis.com/auth/drive',
@@ -249,6 +269,36 @@ def format_job_row(job: Dict[str, Any], date_added: Optional[str] = None) -> Lis
         _safe_job_get(job, 'blurb'),                  # N: Summary
         _safe_job_get(job, 'source').title(),         # O: Source
         _safe_job_get(job, 'job_url'),                # P: Apply Link
+    ]
+
+def format_exclude_row(
+    job: Dict[str, Any],
+    date_excluded: Optional[str] = None,
+) -> List[str]:
+    """
+    Convert an excluded job into an Exclude tab row (10 columns).
+
+    Args:
+        job: Job dictionary carrying 'excluded_stage' and 'excluded_reason'.
+        date_excluded: Timestamp of the drop (defaults to now).
+
+    Returns:
+        List of 10 strings representing the row.
+    """
+    if date_excluded is None:
+        date_excluded = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    return [
+        date_excluded,                                    # A: Date Excluded
+        _safe_job_get(job, 'excluded_stage'),             # B: Stage
+        _safe_job_get(job, 'excluded_reason'),            # C: Reason
+        _safe_job_get(job, 'title'),                      # D: Job Title
+        _safe_job_get(job, 'company'),                    # E: Company
+        _safe_job_get(job, 'primary_role'),               # F: Role Label
+        _safe_job_get(job, 'location'),                   # G: Location
+        _safe_job_get(job, 'source').title(),             # H: Source
+        _safe_job_get(job, 'job_url'),                    # I: Apply Link
+        _safe_job_get(job, 'description_snippet')[:500],  # J: Description
     ]
 
 
@@ -469,6 +519,96 @@ def write_to_sheet(
     log(f"URL: {sheet_url}")
 
     return sheet_url
+
+def write_exclude_tab(
+    jobs: List[Dict[str, Any]],
+    spreadsheet_id: str,
+    sheet_name: str = "Exclude"
+) -> int:
+    """
+    Append excluded jobs to the Exclude tab (F1).
+
+    Dropped jobs are never deleted. They are appended here with the reason
+    they were dropped, so the filter can be reviewed and the rows can later
+    be used to train on what to exclude.
+
+    Append-only and deduplicated by Apply Link, exactly like the Jobs tab, so
+    re-running the pipeline on the same day does not double up the rows.
+
+    Args:
+        jobs: Excluded job dictionaries, carrying 'excluded_reason'.
+        spreadsheet_id: Google Sheets ID (from URL).
+        sheet_name: Worksheet name (default: "Exclude").
+
+    Returns:
+        The number of rows actually appended.
+
+    Raises:
+        SystemExit: If credentials are missing.
+    """
+    if not jobs:
+        log("No excluded jobs to write.")
+        return 0
+
+    creds_json = os.environ.get('GOOGLE_SHEETS_CREDS')
+    if not creds_json:
+        log("ERROR: GOOGLE_SHEETS_CREDS environment variable not set")
+        sys.exit(1)
+
+    client = authenticate_sheets(creds_json)
+    spreadsheet = client.open_by_key(spreadsheet_id)
+
+    # ── Get or Create Worksheet ──
+    try:
+        worksheet = spreadsheet.worksheet(sheet_name)
+        log(f"Using existing worksheet: {sheet_name}")
+    except gspread.exceptions.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(
+            title=sheet_name, rows=2000, cols=len(EXCLUDE_HEADERS)
+        )
+        worksheet.update([EXCLUDE_HEADERS], value_input_option='USER_ENTERED')  # type: ignore
+        log(f"Created new worksheet: {sheet_name}")
+
+    # ── Read Existing URLs ──
+    existing_urls: Set[str] = set()
+    try:
+        for row in worksheet.get_all_records():
+            url = str(row.get('Apply Link', '')).strip()
+            if url:
+                existing_urls.add(url)
+    except Exception:
+        # Empty tab, or a header row that has not been written yet.
+        existing_urls = set()
+
+    # ── Append New Rows Only ──
+    new_jobs = [
+        job for job in jobs
+        if str(job.get('job_url', '')).strip() not in existing_urls
+    ]
+
+    if not new_jobs:
+        log("✓ No new excluded jobs to append")
+        return 0
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    rows = [format_exclude_row(job, now) for job in new_jobs]
+    worksheet.append_rows(rows, value_input_option='USER_ENTERED')  # type: ignore
+
+    # ── Formatting ──
+    last_col = chr(ord('A') + len(EXCLUDE_HEADERS) - 1)
+    worksheet.format(f'A1:{last_col}1', {
+        'textFormat': {
+            'bold': True,
+            'fontSize': 11,
+            'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}
+        },
+        'backgroundColor': {'red': 0.7, 'green': 0.25, 'blue': 0.25},
+        'horizontalAlignment': 'LEFT'
+    })
+    worksheet.freeze(rows=1)
+
+    log(f"✓ Appended {len(new_jobs)} excluded jobs to '{sheet_name}'")
+    return len(new_jobs)
 
 
 # ─── Standalone Entry Point ────────────────────────────────────────────────

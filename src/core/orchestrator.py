@@ -18,6 +18,7 @@ import os
 import sys
 import time
 from datetime import datetime
+from src.pipeline import screening
 
 from src.scrapers import offerzen, indeed, linkedin
 
@@ -159,6 +160,21 @@ def main() -> None:
     else:
         log("\n[PHASE 2] ENRICHMENT SKIPPED (--skip-enrichment flag)")
 
+    # ── PHASE 2.5: SCREENING (F1) ────────────────────────────────────────────
+
+    log("\n[PHASE 2.5] SCREENING OUT NON-TECH JOBS...")
+
+    all_jobs, excluded_jobs, screen_counts = screening.screen_jobs(all_jobs)
+    screening.log_screening(screen_counts, excluded_jobs)
+
+    save_jobs(excluded_jobs, "data/cache/excluded_jobs.json")
+
+    if not all_jobs:
+        log("\n✗ ERROR: every scraped job was screened out!")
+        log("  This usually means enrichment failed and no titles matched.")
+        log("  Check data/cache/excluded_jobs.json before trusting this run.")
+        sys.exit(1)
+
     # ── PHASE 3: WRITE TO SHEETS ─────────────────────────────────────────────
 
     log("\n[PHASE 3] WRITING TO GOOGLE SHEETS...")
@@ -171,6 +187,13 @@ def main() -> None:
         )
         log(f"✓ SHEETS UPDATE COMPLETE")
         log(f"  Sheet URL: {sheet_url}")
+        if excluded_jobs:
+                write_count = sheets.write_exclude_tab(
+                excluded_jobs,
+                args.spreadsheet_id,
+                "Exclude"
+            )
+        log(f"✓ EXCLUDE TAB UPDATED: {write_count} rows appended")
     except Exception as e:
         log(f"✗ Sheets write error: {e}")
         log("  Make sure:")
@@ -191,6 +214,7 @@ def main() -> None:
     log("PIPELINE COMPLETE")
     log("=" * 70)
     log(f"Total jobs: {len(all_jobs)}")
+    log(f"Excluded (non-tech): {screen_counts['dropped_total']}")
     log(f"Time taken: {minutes}m {seconds}s")
     if sheet_url:
         log(f"Sheet URL: {sheet_url}")
