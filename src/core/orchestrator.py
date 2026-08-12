@@ -4,7 +4,8 @@ orchestrator.py — Pipeline orchestration for daily job scraping
 Runs the complete pipeline:
   1. Scrape jobs from all sources (OfferZen, Indeed, LinkedIn, PNet)
   2. Enrich with AI (extract skills, levels, blurbs)
-  3. Write to Google Sheets (sorted, deduplicated)
+  3. Screen out non-tech jobs, keeping the drops with their reasons (F1)
+  4. Write to Google Sheets (sorted, deduplicated)
 
 Designed for GitHub Actions daily runs.
 
@@ -18,7 +19,6 @@ import os
 import sys
 import time
 from datetime import datetime
-from src.pipeline import screening
 
 from src.scrapers import offerzen, indeed, linkedin
 
@@ -31,6 +31,7 @@ except ImportError:
     HAS_PNET = False
 
 from src.enrichment import enhancer
+from src.pipeline import screening
 from src.writers import sheets
 from src.utils import log, save_jobs
 
@@ -187,13 +188,6 @@ def main() -> None:
         )
         log(f"✓ SHEETS UPDATE COMPLETE")
         log(f"  Sheet URL: {sheet_url}")
-        if excluded_jobs:
-                write_count = sheets.write_exclude_tab(
-                excluded_jobs,
-                args.spreadsheet_id,
-                "Exclude"
-            )
-        log(f"✓ EXCLUDE TAB UPDATED: {write_count} rows appended")
     except Exception as e:
         log(f"✗ Sheets write error: {e}")
         log("  Make sure:")
@@ -203,6 +197,24 @@ def main() -> None:
         save_jobs(all_jobs, "data/cache/combined_jobs_fallback.json")
         log("  Saved fallback copy to data/cache/combined_jobs_fallback.json")
         sys.exit(1)
+
+    # ── PHASE 3.5: EXCLUDE TAB ───────────────────────────────────────────────
+    # Handled separately from the Jobs write above. The Jobs sheet is the
+    # deliverable; the Exclude tab is a record for review. If this fails, the
+    # run has still done its job, so it warns rather than exiting.
+
+    if excluded_jobs:
+        try:
+            write_count = sheets.write_exclude_tab(
+                excluded_jobs,
+                args.spreadsheet_id,
+                "Exclude"
+            )
+            log(f"✓ EXCLUDE TAB UPDATED: {write_count} rows appended")
+        except Exception as e:
+            log(f"⚠ Could not write the Exclude tab: {e}")
+            log("  The Jobs sheet is fine. The dropped jobs are still saved in")
+            log("  data/cache/excluded_jobs.json.")
 
     # ── SUMMARY ──────────────────────────────────────────────────────────────
 
