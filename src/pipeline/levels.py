@@ -27,8 +27,13 @@ How it decides, in order
    against a role word — "senior developer", "graduate programme". A loose
    mention of "senior" is ignored, because in most ads it refers to senior
    management or senior stakeholders, not the job being advertised.
-4. **The AI's label**, if enrichment supplied one and nothing else fired.
-5. **unknown.**
+4. **unknown.**
+
+The AI's label is deliberately not used as a fallback. On the first live run
+it called a plain "Test Analyst" a lead and several unmarked titles senior —
+and F4 deletes those from a graduate's view. A guess is not grounds for that.
+The AI's opinion is still stored as ``ai_job_level`` so QA can compare, and
+unknowns are kept by F4 rather than dropped.
 
 Why every job carries its working
 ---------------------------------
@@ -93,7 +98,7 @@ _TITLE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     (JUNIOR, re.compile(r"\b(junior|jnr\.?|jr\.?)\b", re.I)),
     (MID, re.compile(r"\b(mid[\s\-]?level|intermediate)\b", re.I)),
     (SENIOR, re.compile(r"\b(senior|snr\.?|sr\.?|architect)\b", re.I)),
-    (LEAD, re.compile(r"\b(lead|leader|staff engineer|head of)\b", re.I)),
+    (LEAD, re.compile(r"\b(lead|leader|staff|head of|manager|vp|vice president|director)\b", re.I)),
     (PRINCIPAL, re.compile(r"\b(principal|chief)\b", re.I)),
 )
 
@@ -295,19 +300,15 @@ def derive_level(job: Dict[str, Any]) -> Dict[str, str]:
             "confidence": "medium",
         }
 
-    # 4. Whatever the AI said, if it said anything usable.
-    raw_ai = job.get("ai_job_level", job.get("job_level"))
-    ai_level = normalise_level(raw_ai)
-    if ai_level:
-        return {
-            "level": ai_level,
-            "source": "ai",
-            "evidence": str(raw_ai),
-            "confidence": "low",
-        }
-
-    # 5. Say so rather than guess.
+    # 4. Say so rather than guess.
+    #
+    # The AI's label is deliberately NOT used here. F4 removes senior, lead
+    # and principal jobs from a graduate's view, and a guess is not grounds
+    # for that -- on real data the AI called a plain "Test Analyst" a lead.
+    # Unknown is the honest answer, and F4 keeps unknowns. The AI's opinion
+    # is still stored on the job as ai_job_level so QA can compare.
     return {"level": UNKNOWN, "source": "none", "evidence": "", "confidence": "none"}
+
 
 
 # ─── Pipeline Step ──────────────────────────────────────────────────────────

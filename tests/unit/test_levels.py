@@ -68,6 +68,32 @@ def test_titles_are_read_correctly(title, expected):
     assert evidence
 
 
+@pytest.mark.parametrize("title", [
+    "Software Engineering Manager",
+    "Engineering Manager - Cape Town",
+    "VP of Systems Engineer",
+    "Staff QA Engineer",
+    "IT Director",
+    "Head of Engineering",
+])
+def test_managers_and_above_are_read_from_the_title(title):
+    """
+    These came off the first live run, where only the AI caught them. A
+    manager or above is out of reach for the first three years whatever
+    else the ad says, so the title rule should catch them itself.
+    """
+    level, evidence = level_from_title(title)
+    assert level in {LEAD, PRINCIPAL}
+    assert evidence
+
+
+def test_a_junior_prefix_still_wins_over_manager():
+    """Lowest rung wins, so "Junior Account Manager" stays junior."""
+    level, _evidence = level_from_title("Junior Account Manager")
+    assert level == JUNIOR
+
+
+
 def test_a_title_spanning_a_range_takes_the_lower_rung():
     """'Junior to Mid' is open to a junior, so it is a junior job."""
     level, _evidence = level_from_title("Junior to Mid Developer")
@@ -178,21 +204,36 @@ def test_an_empty_job_is_unknown():
     assert derive_level({})["level"] == UNKNOWN
 
 
-# ─── Falling back to the AI ─────────────────────────────────────────────────
+# ─── The AI is not a fallback ───────────────────────────────────────────────
 
-def test_the_ai_label_is_used_as_a_last_resort():
-    job = make_job("Developer", ai_level="Intern")
+def test_the_ai_label_is_never_used_to_decide():
+    """
+    On the first live run the AI called a plain "Test Analyst" a lead, and
+    several unmarked titles senior. F4 deletes those from a graduate's view,
+    so a guess must not be grounds for it. Unknown is the honest answer, and
+    F4 keeps unknowns.
+    """
+    job = make_job("Developer", ai_level="senior")
     result = derive_level(job)
-    assert result["level"] == ENTRY
-    assert result["source"] == "ai"
-    assert result["confidence"] == "low"
+    assert result["level"] == UNKNOWN
+    assert result["source"] == "none"
+
+
+@pytest.mark.parametrize("title", [
+    "Data Engineer",
+    "AWS Cloud Engineer",
+    "ServiceNow Developer",
+    "Test Analyst",
+])
+def test_real_titles_the_ai_wrongly_called_senior_are_unknown(title):
+    """These came off the first live run. None of them says a level."""
+    assert derive_level(make_job(title, ai_level="senior"))["level"] == UNKNOWN
 
 
 def test_the_rules_beat_the_ai():
-    """The AI is the fallback, not the authority."""
+    """A real signal in the title still wins."""
     job = make_job("Junior Developer", ai_level="senior")
     assert derive_level(job)["level"] == JUNIOR
-
 
 @pytest.mark.parametrize("value,expected", [
     ("Intern", ENTRY),
@@ -225,12 +266,12 @@ def test_every_job_records_why_it_got_its_level():
 
     for job in jobs:
         assert job["job_level"] in list(LEVELS) + [UNKNOWN]
-        assert job["level_source"] in {"title", "years", "description", "ai", "none"}
+        assert job["level_source"] in {"title", "years", "description", "none"}
         assert "level_evidence" in job
-        assert job["level_confidence"] in {"high", "medium", "low", "none"}
+        assert job["level_confidence"] in {"high", "medium", "none"}
 
     assert [job["level_source"] for job in jobs] == [
-        "title", "years", "description", "ai", "none"
+        "title", "years", "description", "none", "none"
     ]
 
 
