@@ -49,11 +49,23 @@ We did not use AI or fuzzy matching to decide this. Plain word rules are easy to
 
 ### What the first live run showed
 
-Run 127 on 13 August screened 255 jobs and dropped 73 — 29 on the title list, 44 for having no accepted role type. The Exclude tab was created and filled correctly on the first attempt.
-
-The dropped sample read right: project managers, dispatch supervisors, admissions consultants, electrical engineers, a mechanical engineering intern, a quantity surveyor. Nothing obviously wrong in it.
+Run 127 on 13 August screened 255 jobs. The Exclude tab was created and filled correctly on the first attempt, and the dropped jobs read right: project managers, dispatch supervisors, admissions consultants, electrical engineers, a mechanical engineering intern, a quantity surveyor. Nothing obviously wrong in the sample.
 
 One to keep an eye on: **"Development Engineer"** was dropped because the AI labelled it a Hardware Engineer. That could have been a software job. If more titles like it show up in the Exclude tab, the accept list needs widening.
+
+### An unresolved oddity from that run
+
+**The run's log and the run's own saved file disagree about how many jobs were dropped, and we have not worked out why.**
+
+The log said 73 dropped (29 on the title list, 44 for no accepted role type), and said so in four separate places, including the line `save_jobs` prints immediately after writing the file. But the file that same run saved and uploaded contains **79** dropped jobs, and its list includes jobs the log's own sample shows were kept.
+
+We checked the obvious things and ruled them out:
+
+- Re-running the committed code over that run's scraped jobs gives 79, matching the saved file exactly — so the code is not the difference.
+- The accept-list and the drop-list are byte-identical between the local copy and what was committed.
+- The file was extracted fresh from the untouched artifact, so nothing local had overwritten it.
+
+Six jobs out of 255, and the difference is toward dropping more rather than fewer, so nothing is at risk in the meantime. **How to settle it:** on the next run, compare the log's `Saved N jobs to data/cache/excluded_jobs.json` line against the number of jobs in that run's artifact. Matching means the 13 August download was a one-off; disagreeing again means something real, and we will have a second sample to work from.
 
 ### Still open
 
@@ -105,7 +117,7 @@ We also added a small tool, `python -m src.pipeline.qa`, that pulls 20 random jo
 
 **A range records the lower number.** "2-4 years" is stored as 2. Someone with 2 years can apply, so 2 is the honest answer. Same when an ad asks for several different things — "5+ years in .NET, 3+ years in Azure" is stored as 3. Storing the higher number would push jobs out of reach that are actually open.
 
-**A number only counts if the sentence is about experience.** This turned out to matter a lot. Ads are full of numbers followed by the word "years" that have nothing to do with the person applying — "3 year contract", "a 3 year degree", "we have been running for the last 8 years", "founded 25 years ago". Grabbing those would fill the column with nonsense, and because F4 will drop jobs asking for 4 or more years, a wrong number means a graduate silently loses a job they could have got. A wrong number is worse than a blank.
+**A number only counts if the sentence is about experience.** This turned out to matter a lot. Ads are full of numbers followed by the word "years" that have nothing to do with the person applying — "3 year contract", "a 3 year degree", "we have been running for the last 8 years", "founded 25 years ago". Grabbing those would fill the column with nonsense, and because F4 drops jobs asking for 4 or more years, a wrong number means a graduate silently loses a job they could have got. A wrong number is worse than a blank.
 
 **The title wins over everything.** Companies advertise "Junior Developer" and then ask for 5 years in the body. The title is what they will actually hire for, so it decides, and the job stays in the sheet where the graduate can judge for themselves.
 
@@ -115,7 +127,7 @@ We also added a small tool, `python -m src.pipeline.qa`, that pulls 20 random jo
 
 **We do not guess.** An ad that says nothing about level gets "unknown", not a made-up answer. This matters more than it sounds: F4 keeps unknowns, because ads that say nothing are often open to anyone. Guessing "mid" would be harmless; guessing "senior" throws the job away.
 
-**Every job records why it got its level.** Each one saves which rule decided, the exact words it decided on, and how sure that makes us. F4 is about to start removing jobs based on this label, and a wrong label costs somebody a job they will never know existed. So every decision has to be checkable afterwards.
+**Every job records why it got its level.** Each one saves which rule decided, the exact words it decided on, and how sure that makes us. F4 removes jobs based on this label, and a wrong label costs somebody a job they will never know existed. So every decision has to be checkable afterwards.
 
 ### What the first live run changed
 
@@ -143,7 +155,7 @@ The two changes roughly cancel out in volume — 137 of 255 jobs sit above the c
 
 - **In the run log**, look for `[PHASE 2.4]`. It prints how much of the years column got filled, how many jobs landed on each level, and which rule decided each one. If a rule stops working, the breakdown shifts and you can see it without opening anything. There should never be a level decided by "ai" — if one appears, the fallback has crept back in.
 - **Once a week**, run `python -m src.pipeline.qa`. It writes a table of 20 random jobs to `data/qa/`. Open each link, read the ad, mark the last column. The target is 18 out of 20. Keep the filled-in file — it is the record that the check was done.
-- **The same tool reviews drops** once F4 lands: `python -m src.pipeline.qa -i data/cache/excluded_jobs.json`. It switches to asking whether anything was dropped that should have been kept.
+- **The same tool reviews drops**: `python -m src.pipeline.qa -i data/cache/excluded_jobs.json`. It switches to asking whether anything was dropped that should have been kept.
 
 ### Still open
 
@@ -160,5 +172,79 @@ The 18-out-of-20 target is checked in the tests against 20 made-up ads, where it
 | `tests/unit/test_experience.py` | 50 tests, mostly on numbers that must be ignored |
 | `tests/unit/test_levels.py` | 71 tests, including the senior-management trap |
 | `tests/integration/test_leveling_pipeline.py` | 16 tests on 20 realistic ads |
+
+---
+
+## F4 — Only jobs a graduate could actually get
+
+**Done:** 14 August 2026
+
+### The problem
+
+The sheet was carrying jobs nobody in their first three years of work could get. Senior roles, team leads, ads asking for six years. A graduate opening the sheet had to wade through them to find anything they could actually apply for.
+
+### What we built
+
+A second screen, running straight after the non-tech one. A job is dropped if:
+
+- its level is senior, lead or principal, **or**
+- the ad asks for four or more years
+
+Everything else stays. Dropped jobs go to the same Exclude tab, marked `F4 above cohort` in the Stage column so the two screens can be told apart.
+
+### Why we did it this way
+
+**Jobs that say nothing about seniority are kept.** This is the most important rule in F4 and the easiest to get wrong. About a quarter of what we scrape gives no clue about level, and those ads are usually open to anyone. Dropping them would throw away exactly the jobs this tool exists to find. So silence means keep, not drop.
+
+**The non-tech screen runs first.** When a job fails both, "not a tech job" is the more useful thing to record. A Senior Quantity Surveyor belongs in the Exclude tab as a surveyor, not as a senior.
+
+**Four years is the line, not five.** The brief says drop anything asking for four or more, so three years still counts as our cohort. Both sides of that line are pinned by tests, because it is exactly the kind of boundary that quietly drifts when somebody tidies the code later.
+
+**Doubtful drops are flagged rather than hidden.** Most drops rest on a word in the title or a number the ad states outright. Two paths are softer: a level read from a phrase buried in the body text, and a years figure that came from a job feed rather than the ad's own wording. Those get marked in a new **Needs Review** column on the Exclude tab, so the weekly check can go straight to the doubtful ones instead of reading all of them. On real data that was 2 out of 169 drops.
+
+**Nothing is deleted.** Same as F1. Every dropped job keeps its full record and its reason.
+
+### What we chose not to do
+
+**We did not drop jobs on an AI guess.** That was settled the day before, in F2 — the AI is no longer allowed to decide a level, because it had called a plain "Test Analyst" a lead. F4 inherits that. Every drop it makes traces back to words in the ad.
+
+### One thing that needed care
+
+The Exclude tab already existed with 10 columns and 73 rows before the Needs Review column was added. Writing an eleventh value into a ten-column grid fails outright, so the writer now widens the tab and rewrites its header row when it finds an older one — once, on the first run after this change. Existing rows keep everything they had and simply show a blank in the new column, which is correct: they were all F1 drops, and F1 does not flag for review.
+
+### How to check it is working
+
+- **In the run log**, `[PHASE 2.5]` now shows four counts: the two F1 rules, the F4 count, and how many were flagged for review. The sample of dropped jobs names which screen dropped each one, with `[REVIEW]` against the doubtful ones.
+- **In the Exclude tab**, filter Stage to `F4 above cohort` to see only this screen's drops, or filter Needs Review to YES to see only the doubtful ones.
+- **Once a week**, `python -m src.pipeline.qa -i data/cache/excluded_jobs.json` builds a table asking "should any of these have been kept?".
+
+### What the numbers look like
+
+Replayed over the 255 jobs from the 13 August run:
+
+| Stage | Jobs |
+| :--- | ---: |
+| Scraped | 255 |
+| Dropped as non-tech (F1) | 79 |
+| Dropped as above the cohort (F4) | 90 |
+| **Reaching the board** | **86** |
+
+Of the 90 F4 drops, 88 were on level and 2 on years. Only 2 of the 169 total drops were flagged for review.
+
+### Still open
+
+**The board only gets about 86 jobs a day, and most are repeats.** The sheet already holds thousands of jobs, so a day's run usually adds only ten or twenty genuinely new rows. Filtering is no longer the problem — supply is. That makes F7, which searches for the tracks we currently miss entirely, more urgent than its position in the list suggests.
+
+**59% of what reaches the board has no level at all.** Expected, and not a fault: those ads simply do not say. But it means the board's level filter will be blank for most jobs, and the default view has to treat "no level" as in scope.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `src/pipeline/screening.py` | Added the F4 screen alongside F1 |
+| `src/writers/sheets.py` | Needs Review column, and a one-off header repair for the tab |
+| `src/core/orchestrator.py` | Summary splits the two kinds of exclusion |
+| `tests/unit/test_screening.py` | 29 more tests — the four-year boundary, unknowns kept, review flags |
+| `tests/integration/test_screening_pipeline.py` | F4 on real ads, plus the header migration |
 
 ---
