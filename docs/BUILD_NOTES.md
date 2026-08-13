@@ -248,3 +248,76 @@ Of the 90 F4 drops, 88 were on level and 2 on years. Only 2 of the 169 total dro
 | `tests/integration/test_screening_pipeline.py` | F4 on real ads, plus the header migration |
 
 ---
+
+## F9 — The same job, posted twice
+
+**Done:** 14 August 2026
+
+### The problem
+
+The same job kept landing in the sheet more than once, in two different ways.
+
+Indeed re-posts an advert a few weeks later under a new web address. And a recruitment agency lists a role at the same time as the employer's own HR team, under two different company names. The only check we had was on the web address, and neither of those has the same address twice.
+
+For someone reading the board, this is the difference between fifteen jobs and fifteen rows that turn out to be nine jobs.
+
+### What we built
+
+Three checks, each catching something the one before it cannot:
+
+1. **Exact web address** — the same listing scraped twice in one run.
+2. **Title + company + city** — the same advert re-posted at a new address.
+3. **Title + city + the words of the advert** — the same job listed by an agency and by the employer.
+
+Titles get tidied before comparing, because job boards staple decoration onto them: "(Remote)", "Ref: ABC123", "URGENT", a trailing city. Company names get their legal endings stripped, so "Acme" matches "Acme (Pty) Ltd".
+
+It runs in two places. Straight after scraping, and again against the sheet when deciding what is new.
+
+### Why we did it this way
+
+**The agency check leaves the company name out on purpose.** That is the whole point of it — the company name is the one field that differs when an agency and an employer post the same role. So the words of the advert stand in for it instead. Agencies copy the employer's text across word for word often enough that this catches the common case.
+
+**But the advert text has to be long enough to prove anything.** Two ads sharing a short blurb prove nothing; "Apply now, great opportunity" is not evidence. So there is a floor — a few paragraphs' worth — and anything shorter is never matched on. Without it, every job with a one-line description would collapse into every other one.
+
+**The city stays in every check.** The same role genuinely open in Cape Town and in Johannesburg is two jobs, not one, and a graduate should see both. This was a deliberate call: it means we accept some duplicates from companies that post per-city, in exchange for never hiding a job that is actually in someone's town.
+
+**A job missing its title or company is never treated as a duplicate.** An empty value matching another empty value is not evidence of anything. Left unchecked, a handful of records with blank companies would collapse into one and take real jobs with them.
+
+**When two copies collide we keep the fuller one.** The longer description wins, and if they tie, the newer posting date does. The copy we keep should be the one with the most for a person to read.
+
+**Doing it before the AI step saves money too.** An advert listed for three cities used to be enriched three times. Now it collapses to one first. That was not the reason for building it, but it is a real saving on every run.
+
+### What we chose not to do
+
+**No fuzzy matching.** No similarity scores, no thresholds. The brief asks for plain matching and it is the right call: fuzzy matching goes wrong quietly, and a graduate who never sees a real job because two adverts scored 0.87 has no way of knowing it happened. Plain rules can be read, explained, and fixed.
+
+**We are not touching the thousands of rows already in the sheet.** The check applies to what comes in from now on. Cleaning up the history is a separate job and not in the brief.
+
+### The limit, stated honestly
+
+**An advert an agency has rewritten in its own words is not caught.** Different title wording, different company, different text — there is nothing left to match on without guessing. We know this and we are choosing to live with it, because the alternative is fuzzy matching and the cost of that falls on the wrong person.
+
+### One thing that needed care
+
+The company-name tidying nearly shipped with a bug that would have made it almost useless here. South African companies are usually written "Acme (Pty) Ltd" — with a bracket sitting between "pty" and "ltd". The pattern looked for those two words together, so the most common company format in the country went unmatched and left "pty" stuck to the name. A test caught it. Now "pty" is also listed on its own.
+
+### How to check it is working
+
+- **In the run log**, look for `[PHASE 1.5]`. It prints how many duplicates were removed and which check caught each one, then the unique count out of the scraped count.
+- **Watch the third number.** If "same advert via another poster" starts removing a lot, that means adverts are sharing boilerplate text rather than being genuine duplicates, and the text floor needs raising. A handful a day is normal; dozens is a warning.
+- **In the sheet**, the real test is whether the same title and company appear twice on different days. If one slips through, take the two rows to the tests — an example that got missed is worth more than another rule.
+
+### Still open
+
+We have not seen this run against live data yet. The counts from the first run are the thing to read: how many the address check catches on its own, and whether the other two are earning their place.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `src/pipeline/dedupe.py` | The three checks, and the tidying they need |
+| `src/writers/sheets.py` | Checks the sheet for a re-post before adding a row |
+| `src/core/orchestrator.py` | Runs it as Phase 1.5, before the AI |
+| `tests/unit/test_dedupe.py` | 47 tests, including the "(Pty) Ltd" case |
+
+---
