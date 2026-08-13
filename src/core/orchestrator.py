@@ -162,7 +162,7 @@ def main() -> None:
     else:
         log("\n[PHASE 2] ENRICHMENT SKIPPED (--skip-enrichment flag)")
 
-        # ── PHASE 2.4: LEVELS AND YEARS (F2, F3) ─────────────────────────────────
+    # ── PHASE 2.4: LEVELS AND YEARS (F2, F3) ─────────────────────────────────
     # Runs after enrichment so the rules get the last word over the AI, and
     # before screening because F4 will decide what to drop from these fields.
 
@@ -242,7 +242,11 @@ def main() -> None:
     log("PIPELINE COMPLETE")
     log("=" * 70)
     log(f"Total jobs: {len(all_jobs)}")
-    log(f"Excluded (non-tech): {screen_counts['dropped_total']}")
+    dropped_non_tech = (screen_counts.get('dropped_title_blocklist', 0)
+                        + screen_counts.get('dropped_role_not_accepted', 0))
+    log(f"Excluded (non-tech):   {dropped_non_tech}")
+    log(f"Excluded (too senior): {screen_counts.get('dropped_above_cohort', 0)}")
+    log(f"Excluded (too senior): {screen_counts.get('dropped_above_cohort', 0)}")
     log(f"Time taken: {minutes}m {seconds}s")
     if sheet_url:
         log(f"Sheet URL: {sheet_url}")

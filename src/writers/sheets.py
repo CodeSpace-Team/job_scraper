@@ -110,13 +110,18 @@ EXCLUDE_HEADERS: List[str] = [
     "Source",
     "Apply Link",
     "Description",
+    "Needs Review",
 ]
 """
-Columns for the Exclude tab (F1).
+Columns for the Exclude tab (F1, F4).
 
 The role label and the description are carried deliberately: the brief wants
 the dropped rows to be usable later as training data for what to exclude, and
 neither is recoverable once the job is gone.
+
+Needs Review marks a drop that rests on softer evidence -- a level read from
+the body text rather than the title, or a years figure that came from a feed
+rather than the ad's own words. Filter on it to spot wrong drops quickly.
 """
 
 SHEET_SCOPES: List[str] = [
@@ -276,14 +281,14 @@ def format_exclude_row(
     date_excluded: Optional[str] = None,
 ) -> List[str]:
     """
-    Convert an excluded job into an Exclude tab row (10 columns).
+        Convert an excluded job into an Exclude tab row.
 
     Args:
         job: Job dictionary carrying 'excluded_stage' and 'excluded_reason'.
         date_excluded: Timestamp of the drop (defaults to now).
 
     Returns:
-        List of 10 strings representing the row.
+        One string per column in EXCLUDE_HEADERS.
     """
     if date_excluded is None:
         date_excluded = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -299,7 +304,9 @@ def format_exclude_row(
         _safe_job_get(job, 'source').title(),             # H: Source
         _safe_job_get(job, 'job_url'),                    # I: Apply Link
         _safe_job_get(job, 'description_snippet')[:500],  # J: Description
+        "YES" if job.get('needs_review') else "",          # K: Needs Review
     ]
+    
 
 
 def deduplicate_jobs(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -568,6 +575,27 @@ def write_exclude_tab(
         )
         worksheet.update([EXCLUDE_HEADERS], value_input_option='USER_ENTERED')  # type: ignore
         log(f"Created new worksheet: {sheet_name}")
+
+    # ── Repair the Header Row ──
+    # The tab may predate a column being added -- the Needs Review column
+    # arrived with F4, after the tab already held F1's drops. Existing rows
+    # keep their values and simply have the new column blank; the header row
+    # has to name it so that reading by header, and every future append,
+    # stay lined up.
+    if worksheet.col_count < len(EXCLUDE_HEADERS):
+        worksheet.resize(cols=len(EXCLUDE_HEADERS))
+
+    try:
+        current_headers = worksheet.row_values(1)
+    except Exception:
+        current_headers = []
+
+    if current_headers and list(current_headers) != EXCLUDE_HEADERS:
+        worksheet.update([EXCLUDE_HEADERS], value_input_option='USER_ENTERED')  # type: ignore
+        log(f"Updated the '{sheet_name}' header row "
+            f"({len(current_headers)} -> {len(EXCLUDE_HEADERS)} columns)")
+
+    # ── Read Existing URLs ──
 
     # ── Read Existing URLs ──
     existing_urls: Set[str] = set()

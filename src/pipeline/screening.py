@@ -1,22 +1,33 @@
 """
-screening.py — keep or drop, with a reason for every drop (F1)
-===============================================================
+screening.py — keep or drop, with a reason for every drop (F1, F4)
+===================================================================
 
-The problem
------------
+Two screens run here, back to back, and neither deletes anything. A dropped
+job keeps its full record and goes to the Exclude tab with the reason written
+next to it, so the drops can be reviewed and later used to train a better
+filter.
+
+F1 — only tech jobs
+-------------------
 Indeed matches the words "engineer" and "developer" very loosely, which is how
 mining engineers, quantity surveyors and warehouse assistants ended up in the
 sheet. Nothing threw the wrong jobs out.
 
-What this does
---------------
-Runs one keep-or-drop decision over every job before it reaches the sheet.
-Nothing is deleted: a dropped job keeps its full record and goes to the
-Exclude tab with the reason written next to it, so the drops can be reviewed
-and later used to train a better filter.
+F4 — the first three years of a career
+--------------------------------------
+The sheet should only carry jobs a person in their first three working years
+could actually get, so anything senior, lead or principal goes, as does
+anything asking for four or more years. Jobs with no level and no years stay:
+those ads are often open to anyone, and after the F2 amendment that is around
+a quarter of everything scraped -- dropping them would throw away the very
+roles this tool exists to surface.
 
-The decision, in order
-----------------------
+F1 runs first. When a job fails both screens, "not a tech job" is the more
+useful reason to record: a Senior Quantity Surveyor belongs in the Exclude tab
+as a surveyor, not as a senior.
+
+The F1 decision, in order
+-------------------------
 1. The title carries a word that means "not our kind of job" -> drop.
 2. The AI's role label matches the accept-list -> keep.
 3. The role label is missing or unrecognised, but the title itself reads as a
@@ -37,6 +48,16 @@ house is still a tech job, so "mining engineer" is blocked while "mining"
 alone is not. Word boundaries matter for the same reason: the rule that drops
 sales representatives must not drop a Salesforce developer.
 
+Reviewing the drops
+-------------------
+F4 removes jobs on the strength of the F2 label, so a wrong label silently
+costs a graduate a job. Most drops rest on the title or on a number the ad
+states outright, but two paths are softer -- a level read from a phrase in the
+body text, and a years figure that came from a feed rather than the ad. Those
+are flagged ``needs_review`` so the weekly QA pass can check them:
+
+    python -m src.pipeline.qa -i data/cache/excluded_jobs.json
+
 Usage
 -----
     from src.pipeline import screening
@@ -48,13 +69,23 @@ Usage
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
+from src.pipeline.levels import LEAD, PRINCIPAL, SENIOR
 from src.utils import log
 
 
 # ─── Constants ──────────────────────────────────────────────────────────────
 
 STAGE_NON_TECH = "F1 non-tech"
-"""Label written to the Exclude tab's Stage column by this screen."""
+"""Label written to the Exclude tab's Stage column by the F1 screen."""
+
+STAGE_ABOVE_COHORT = "F4 above cohort"
+"""Label written to the Exclude tab's Stage column by the F4 screen."""
+
+MAX_YEARS_FOR_COHORT = 4
+"""An ad asking for this many years or more is above our graduates (F4)."""
+
+BLOCKED_LEVELS = frozenset({SENIOR, LEAD, PRINCIPAL})
+"""Levels beyond the first three years of a career (F4)."""
 
 SAMPLE_SIZE = 10
 """How many dropped titles to print in the run log, so precision is checkable."""
@@ -255,19 +286,65 @@ def screen_non_tech(job: Dict[str, Any]) -> Tuple[bool, str, str]:
     return False, f"role type not accepted ({said})", "role_not_accepted"
 
 
+# ─── F4: the first three years ──────────────────────────────────────────────
+
+def screen_above_cohort(job: Dict[str, Any]) -> Tuple[bool, str, bool]:
+    """
+    Decide whether a job sits above the first three years of a career (F4).
+
+    A job goes if its level is senior, lead or principal, or if the ad asks
+    for four or more years. Everything else stays, including jobs with no
+    level and no years -- those ads are usually open to anyone.
+
+    Args:
+        job: Job dictionary, already leveled by F2 and dated by F3.
+
+    Returns:
+        A (keep, reason, needs_review) tuple. needs_review marks a drop that
+        rests on softer evidence and should be checked by the weekly QA pass.
+    """
+    level = job.get("job_level") or ""
+    years = job.get("experience_years")
+
+    if level in BLOCKED_LEVELS:
+        source = job.get("level_source") or "unknown"
+        evidence = job.get("level_evidence") or "nothing recorded"
+        # A level read out of the body text is softer than one in the title.
+        weak = source == "description"
+        return False, f"level is {level} (from {source}: '{evidence}')", weak
+
+    if isinstance(years, int) and not isinstance(years, bool):
+        if years >= MAX_YEARS_FOR_COHORT:
+            source = job.get("years_source") or "unknown"
+            evidence = job.get("years_evidence") or f"{years} years"
+            # A number the ad states outright is stronger than one a feed
+            # handed over, which we cannot trace back to any wording.
+            weak = source != "text"
+            return False, f"asks for {years}+ years (from {source}: '{evidence}')", weak
+
+    return True, "", False
+
+
+# ─── Both screens ───────────────────────────────────────────────────────────
+
+
 def screen_jobs(
     jobs: Sequence[Dict[str, Any]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, int]]:
     """
-    Split a day's jobs into the ones we keep and the ones we exclude (F1).
+    Split a day's jobs into the ones we keep and the ones we exclude.
+
+    Runs F1 then F4. A job that fails F1 never reaches F4, so a non-tech job
+    is filed under the reason that actually matters.
 
     Excluded jobs are returned, never discarded, and each one carries:
         excluded_stage  -- which screen dropped it
         excluded_reason -- why, in words
         excluded_rule   -- which rule fired, for the run log
+        needs_review    -- True when the drop rests on softer evidence
 
     Args:
-        jobs: Job dictionaries, after scraping and enrichment.
+        jobs: Job dictionaries, after scraping, enrichment, F2 and F3.
 
     Returns:
         A (kept, excluded, counts) tuple. counts summarises the run and
@@ -281,28 +358,67 @@ def screen_jobs(
         "kept": 0,
         "dropped_title_blocklist": 0,
         "dropped_role_not_accepted": 0,
+        "dropped_above_cohort": 0,
         "dropped_total": 0,
+        "needs_review": 0,
     }
 
     for job in jobs:
+        # ── F1: is this a tech job at all? ──
         keep, reason, rule = screen_non_tech(job)
-
-        if keep:
-            job["excluded_stage"] = ""
-            job["excluded_reason"] = ""
-            job["excluded_rule"] = rule
-            kept.append(job)
-            counts["kept"] += 1
+        if not keep:
+            _record_drop(job, excluded, counts, STAGE_NON_TECH, reason, rule, False)
             continue
 
-        job["excluded_stage"] = STAGE_NON_TECH
-        job["excluded_reason"] = reason
+        # ── F4: is it within the first three years? ──
+        keep, reason, needs_review = screen_above_cohort(job)
+        if not keep:
+            _record_drop(
+                job, excluded, counts,
+                STAGE_ABOVE_COHORT, reason, "above_cohort", needs_review,
+            )
+            continue
+
+        job["excluded_stage"] = ""
+        job["excluded_reason"] = ""
         job["excluded_rule"] = rule
-        excluded.append(job)
-        counts[f"dropped_{rule}"] = counts.get(f"dropped_{rule}", 0) + 1
-        counts["dropped_total"] += 1
+        job["needs_review"] = False
+        kept.append(job)
+        counts["kept"] += 1
 
     return kept, excluded, counts
+
+
+def _record_drop(
+    job: Dict[str, Any],
+    excluded: List[Dict[str, Any]],
+    counts: Dict[str, int],
+    stage: str,
+    reason: str,
+    rule: str,
+    needs_review: bool,
+) -> None:
+    """
+    Mark a job as dropped and file it, so no drop is ever silent.
+
+    Args:
+        job: The job being dropped.
+        excluded: The list collecting dropped jobs.
+        counts: The running summary, updated in place.
+        stage: Which screen dropped it.
+        reason: Why, in words.
+        rule: Which rule fired, for the run log.
+        needs_review: True when the drop rests on softer evidence.
+    """
+    job["excluded_stage"] = stage
+    job["excluded_reason"] = reason
+    job["excluded_rule"] = rule
+    job["needs_review"] = needs_review
+
+    excluded.append(job)
+    counts[f"dropped_{rule}"] = counts.get(f"dropped_{rule}", 0) + 1
+    counts["dropped_total"] += 1
+    counts["needs_review"] += int(needs_review)
 
 
 # ─── Run Log ────────────────────────────────────────────────────────────────
@@ -324,13 +440,20 @@ def log_screening(
     """
     log(f"  screened {counts['input']} jobs "
         f"-> kept {counts['kept']}, dropped {counts['dropped_total']}")
-    log(f"    dropped on title blocklist:  {counts.get('dropped_title_blocklist', 0)}")
-    log(f"    dropped on role not accepted: {counts.get('dropped_role_not_accepted', 0)}")
+    log(f"    F1 dropped on title blocklist:   "
+        f"{counts.get('dropped_title_blocklist', 0)}")
+    log(f"    F1 dropped on role not accepted: "
+        f"{counts.get('dropped_role_not_accepted', 0)}")
+    log(f"    F4 dropped as above the cohort:  "
+        f"{counts.get('dropped_above_cohort', 0)}")
+    log(f"    flagged for QA review:           {counts.get('needs_review', 0)}")
 
     if not excluded:
         return
 
     log(f"  sample of dropped jobs (first {min(SAMPLE_SIZE, len(excluded))}):")
     for job in excluded[:SAMPLE_SIZE]:
-        title = (job.get("title", "") or "(no title)")[:55]
-        log(f"    - {title} | {job.get('excluded_reason', '')}")
+        title = (job.get("title", "") or "(no title)")[:45]
+        flag = " [REVIEW]" if job.get("needs_review") else ""
+        log(f"    - {title} | {job.get('excluded_stage', '')}{flag} | "
+            f"{job.get('excluded_reason', '')}")

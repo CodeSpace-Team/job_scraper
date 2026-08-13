@@ -12,10 +12,13 @@ Covers the three things F1 has to get right:
 import pytest
 
 from src.pipeline.screening import (
+    MAX_YEARS_FOR_COHORT,
+    STAGE_ABOVE_COHORT,
     STAGE_NON_TECH,
     log_screening,
     match_accepted_role,
     match_blocked_title,
+    screen_above_cohort,
     screen_jobs,
     screen_non_tech,
 )
@@ -25,6 +28,19 @@ def make_job(title="", primary_role="", **extra):
     """Build a minimal job dictionary for a test case."""
     job = {"title": title, "primary_role": primary_role, "job_url": f"u/{title}"}
     job.update(extra)
+    return job
+
+
+
+def leveled(title="Software Developer", level="", years=None, **extra):
+    """Build a tech job that has already been through F2 and F3."""
+    job = make_job(title, "Developer", job_level=level, **extra)
+    job.setdefault("level_source", "title")
+    job.setdefault("level_evidence", level or "")
+    if years is not None:
+        job["experience_years"] = years
+        job.setdefault("years_source", "text")
+        job.setdefault("years_evidence", f"{years} years")
     return job
 
 
@@ -191,3 +207,190 @@ def test_log_screening_runs_without_error(capsys):
     assert "screened 2 jobs" in output
     assert "dropped 1" in output
     assert "Mining Engineer" in output
+
+
+
+# ─── F4: the first three years ──────────────────────────────────────────────
+
+@pytest.mark.parametrize("level", ["senior", "lead", "principal"])
+def test_levels_above_the_cohort_are_dropped(level):
+    keep, reason, _review = screen_above_cohort(leveled(level=level))
+    assert keep is False
+    assert level in reason
+
+
+@pytest.mark.parametrize("level", ["entry level", "junior", "mid", "unknown", ""])
+def test_levels_within_the_cohort_are_kept(level):
+    keep, _reason, _review = screen_above_cohort(leveled(level=level))
+    assert keep is True
+
+
+@pytest.mark.parametrize("years,expected_keep", [
+    (0, True),
+    (1, True),
+    (2, True),
+    (3, True),
+    (4, False),
+    (5, False),
+    (12, False),
+])
+def test_the_boundary_sits_at_four_years(years, expected_keep):
+    """
+    Three years in is still our cohort; four is not. The brief draws the
+    line at 4+, so 3 and 4 are the two cases worth pinning down.
+    """
+    keep, _reason, _review = screen_above_cohort(leveled(years=years))
+    assert keep is expected_keep
+
+
+def test_the_boundary_matches_the_named_constant():
+    """If the constant moves, the rule moves with it."""
+    keep, _r, _v = screen_above_cohort(leveled(years=MAX_YEARS_FOR_COHORT - 1))
+    assert keep is True
+    keep, _r, _v = screen_above_cohort(leveled(years=MAX_YEARS_FOR_COHORT))
+    assert keep is False
+
+
+def test_a_job_with_no_level_and_no_years_is_kept():
+    """
+    The most important rule in F4. About a quarter of scraped jobs say
+    nothing about seniority, and those ads are usually open to anyone.
+    Dropping them would throw away exactly what this tool exists to find.
+    """
+    keep, _reason, _review = screen_above_cohort(make_job("Software Developer", "Developer"))
+    assert keep is True
+
+
+def test_the_reason_names_the_evidence():
+    """A drop has to be traceable back to words in the ad."""
+    _keep, reason, _review = screen_above_cohort(
+        leveled(title="Senior Developer", level="senior",
+                level_source="title", level_evidence="Senior")
+    )
+    assert "senior" in reason
+    assert "title" in reason
+    assert "Senior" in reason
+
+
+# ─── Flagging the softer drops ──────────────────────────────────────────────
+
+def test_a_level_from_the_title_is_not_flagged():
+    _k, _r, review = screen_above_cohort(leveled(level="senior", level_source="title"))
+    assert review is False
+
+
+def test_a_level_from_the_description_is_flagged():
+    """The narrow phrase rule is the softest path to a senior label."""
+    _k, _r, review = screen_above_cohort(
+        leveled(level="senior", level_source="description")
+    )
+    assert review is True
+
+
+def test_years_read_from_the_ad_are_not_flagged():
+    _k, _r, review = screen_above_cohort(leveled(years=6, years_source="text"))
+    assert review is False
+
+
+def test_years_from_a_feed_are_flagged():
+    """A feed's number cannot be traced back to any wording in the ad."""
+    _k, _r, review = screen_above_cohort(leveled(years=6, years_source="feed"))
+    assert review is True
+
+
+# ─── Both screens together ──────────────────────────────────────────────────
+
+def test_f1_runs_before_f4():
+    """
+    A Senior Quantity Surveyor belongs in the Exclude tab as a surveyor,
+    not as a senior -- the non-tech reason is the useful one.
+    """
+    _kept, excluded, _counts = screen_jobs([
+        make_job("Senior Quantity Surveyor", "Surveyor", job_level="senior"),
+    ])
+    assert excluded[0]["excluded_stage"] == STAGE_NON_TECH
+
+
+def test_each_screen_files_under_its_own_stage():
+    _kept, excluded, _counts = screen_jobs([
+        make_job("Mining Engineer", "Mining Engineer"),
+        leveled(title="Senior Developer", level="senior"),
+    ])
+    stages = [job["excluded_stage"] for job in excluded]
+    assert stages == [STAGE_NON_TECH, STAGE_ABOVE_COHORT]
+
+
+def test_counts_are_split_across_both_screens():
+    _kept, _excluded, counts = screen_jobs([
+        make_job("Mining Engineer", "Mining Engineer"),      # F1 blocklist
+        make_job("Operations Manager", "Operations"),        # F1 not accepted
+        leveled(title="Senior Developer", level="senior"),   # F4 level
+        leveled(years=7),                                    # F4 years
+        leveled(level="junior"),                             # kept
+    ])
+    assert counts["dropped_title_blocklist"] == 1
+    assert counts["dropped_role_not_accepted"] == 1
+    assert counts["dropped_above_cohort"] == 2
+    assert counts["kept"] == 1
+    assert counts["dropped_total"] == 4
+    assert counts["kept"] + counts["dropped_total"] == counts["input"]
+
+
+def test_review_flags_are_counted():
+    _kept, _excluded, counts = screen_jobs([
+        leveled(level="senior", level_source="description"),   # flagged
+        leveled(title="Senior Developer", level="senior"),     # not flagged
+    ])
+    assert counts["needs_review"] == 1
+
+
+def test_every_kept_job_carries_a_needs_review_field():
+    """The Sheets writer reads this field on every row it writes."""
+    kept, excluded, _counts = screen_jobs([
+        leveled(level="junior"),
+        leveled(title="Senior Developer", level="senior"),
+    ])
+    for job in kept + excluded:
+        assert "needs_review" in job
+
+
+# ─── F4's done-when ─────────────────────────────────────────────────────────
+
+def test_nothing_above_the_cohort_survives():
+    """
+    F4's done-when: no senior, lead or principal rows reach the sheet, and
+    no rows asking for 4+ years.
+    """
+    jobs = [
+        leveled(title="Senior Developer", level="senior"),
+        leveled(title="Team Lead", level="lead"),
+        leveled(title="Principal Engineer", level="principal"),
+        leveled(years=4),
+        leveled(years=9),
+        leveled(level="junior"),
+        leveled(level="unknown"),
+        leveled(level="mid", years=3),
+        make_job("Software Developer", "Developer"),
+    ]
+    kept, _excluded, _counts = screen_jobs(jobs)
+
+    assert len(kept) == 4
+    for job in kept:
+        assert job.get("job_level") not in {"senior", "lead", "principal"}
+        years = job.get("experience_years")
+        assert years is None or years < MAX_YEARS_FOR_COHORT
+
+
+def test_log_reports_both_screens(capsys):
+    _kept, excluded, counts = screen_jobs([
+        make_job("Mining Engineer", "Mining Engineer"),
+        leveled(title="Senior Developer", level="senior"),
+        leveled(level="senior", level_source="description"),
+    ])
+    log_screening(counts, excluded)
+
+    output = capsys.readouterr().out
+    assert "F1 dropped on title blocklist" in output
+    assert "F4 dropped as above the cohort" in output
+    assert "flagged for QA review" in output
+    assert "[REVIEW]" in output
