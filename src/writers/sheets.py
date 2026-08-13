@@ -64,8 +64,9 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Set, Union
+from typing import List, Dict, Any, Optional, Set, Tuple, Union
 
+from src.pipeline.dedupe import is_comparable, key_from_row, duplicate_key
 from src.utils import log
 
 try:
@@ -400,7 +401,9 @@ def write_to_sheet(
 
     # ── Check for Migration (old 15-column format) ──
     needs_migration = False
+    # ── Read Existing URLs ──
     existing_urls: Set[str] = set()
+    existing_keys: Set[Tuple[str, str, str]] = set()
     existing_data: List[List[str]] = []
 
     try:
@@ -447,9 +450,18 @@ def write_to_sheet(
                     for row in records
                     if row.get('Apply Link')
                 }
+                                # The same key the F9 step uses, rebuilt from the rows already
+                # in the sheet. This is what catches a re-post: an advert from
+                # weeks ago reappearing under a fresh web address would sail
+                # past the Apply Link check and land as a second row.
+                existing_keys = {
+                    key for key in (key_from_row(row) for row in records)
+                    if is_comparable(key)
+                }
                 existing_count = len(records)
             except Exception:
                 existing_urls = set()
+                existing_keys = set()
                 existing_count = 0
 
     except Exception:
@@ -459,12 +471,23 @@ def write_to_sheet(
         needs_migration = False
 
     # ── Filter New Jobs ──
-    new_jobs = [
-        job for job in unique_jobs
-        if str(job.get('job_url', '')).strip() not in existing_urls
-    ]
+    # A job is new only if neither its web address nor its title/company/city
+    # already appears in the sheet (F9).
+    new_jobs = []
+    reposts = 0
+
+    for job in unique_jobs:
+        if str(job.get('job_url', '')).strip() in existing_urls:
+            continue
+        key = duplicate_key(job)
+        if is_comparable(key) and key in existing_keys:
+            reposts += 1
+            continue
+        new_jobs.append(job)
 
     log(f"Found {existing_count} existing jobs in sheet")
+    if reposts:
+        log(f"Skipped {reposts} re-posts already in the sheet under another link")
     log(f"Identified {len(new_jobs)} new jobs to add")
 
     # ── Write to Sheet ──

@@ -3,10 +3,11 @@ orchestrator.py — Pipeline orchestration for daily job scraping
 ================================================================
 Runs the complete pipeline:
   1. Scrape jobs from all sources (OfferZen, Indeed, LinkedIn, PNet)
-  2. Enrich with AI (extract skills, levels, blurbs)
-  3. Work out each job's level and years of experience (F2, F3)
-  4. Screen out non-tech jobs, keeping the drops with their reasons (F1)
-  5. Write to Google Sheets (sorted, deduplicated)
+  2. Remove duplicates and re-posts (F9)
+  3. Enrich with AI (extract skills, levels, blurbs)
+  4. Work out each job's level and years of experience (F2, F3)
+  5. Screen out non-tech and above-cohort jobs, with reasons (F1, F4)
+  6. Write to Google Sheets
 
 Designed for GitHub Actions daily runs.
 
@@ -32,7 +33,7 @@ except ImportError:
     HAS_PNET = False
 
 from src.enrichment import enhancer
-from src.pipeline import experience, levels, screening
+from src.pipeline import dedupe, experience, levels, screening
 from src.writers import sheets
 from src.utils import log, save_jobs
 
@@ -135,6 +136,14 @@ def main() -> None:
 
     log(f"\n✓ SCRAPING COMPLETE: {len(all_jobs)} total jobs")
 
+    # ── PHASE 1.5: DUPLICATES (F9) ───────────────────────────────────────────
+    # Before enrichment, so the same advert listed for three cities is not
+    # sent to the AI three times.
+
+    log("\n[PHASE 1.5] REMOVING DUPLICATES...")
+    all_jobs, dupe_counts = dedupe.deduplicate(all_jobs)
+    dedupe.log_dedupe(dupe_counts)
+
     # ── PHASE 2: ENRICHMENT ──────────────────────────────────────────────────
 
     if not args.skip_enrichment:
@@ -175,7 +184,6 @@ def main() -> None:
     levels.log_levels(all_jobs)
 
     save_jobs(all_jobs, "data/cache/combined_jobs_leveled.json")
-
 
     # ── PHASE 2.5: SCREENING (F1) ────────────────────────────────────────────
 
@@ -242,10 +250,10 @@ def main() -> None:
     log("PIPELINE COMPLETE")
     log("=" * 70)
     log(f"Total jobs: {len(all_jobs)}")
+    log(f"Duplicates removed:    {dupe_counts['removed']}")
     dropped_non_tech = (screen_counts.get('dropped_title_blocklist', 0)
                         + screen_counts.get('dropped_role_not_accepted', 0))
     log(f"Excluded (non-tech):   {dropped_non_tech}")
-    log(f"Excluded (too senior): {screen_counts.get('dropped_above_cohort', 0)}")
     log(f"Excluded (too senior): {screen_counts.get('dropped_above_cohort', 0)}")
     log(f"Time taken: {minutes}m {seconds}s")
     if sheet_url:
