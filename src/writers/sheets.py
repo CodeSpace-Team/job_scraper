@@ -67,7 +67,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple, Union
 
 from src.pipeline.dedupe import is_comparable, key_from_row, duplicate_key
-from src.utils import log
+from src.utils import log, retry
 
 try:
     import gspread
@@ -337,6 +337,27 @@ def deduplicate_jobs(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return unique
 
 
+@retry(exceptions=(ConnectionError, TimeoutError), tries=3, delay=2.0, backoff=2.0)
+def _open_spreadsheet(client: gspread.Client, spreadsheet_id: str) -> gspread.Spreadsheet:
+    """
+    Open a spreadsheet by ID, retrying on a dropped connection.
+
+    Google's API resets the connection now and then for no reason tied to
+    anything wrong with the request -- it happened on the run this was
+    added for, with nothing else in the run at fault. Retried, the same
+    call went through immediately. Only a network failure is retried here;
+    a bad spreadsheet ID or missing sharing permission fails the same way
+    it always did, since trying again will not fix either of those.
+
+    Args:
+        client: An authenticated gspread client.
+        spreadsheet_id: Google Sheets ID (from URL).
+
+    Returns:
+        The opened spreadsheet.
+    """
+    return client.open_by_key(spreadsheet_id)
+
 # ─── Main Writer ────────────────────────────────────────────────────────────
 
 def write_to_sheet(
@@ -352,12 +373,18 @@ def write_to_sheet(
         spreadsheet_id: Google Sheets ID (from URL)
         sheet_name: Name of worksheet (default: "Jobs")
 
-    Returns:
+        Returns:
         URL of the updated spreadsheet
 
     Raises:
-        SystemExit: If credentials are missing or authentication fails
-        Exception: If sheet operations fail
+        RuntimeError: If credentials are missing or the spreadsheet cannot
+            be opened. A plain exception, not SystemExit, so a caller such
+            as the orchestrator can catch it and decide what to do -- a
+            direct process exit here would skip past that decision
+            entirely, which is exactly what happened on the run this was
+            fixed for. The standalone command-line entry point at the
+            bottom of this file still ends the process the same way it
+            always did, since nothing there catches it either.
 
     Note:
         This is an append-only operation. Existing jobs are never overwritten.
@@ -366,21 +393,23 @@ def write_to_sheet(
     # ── Authentication ──
     creds_json = os.environ.get('GOOGLE_SHEETS_CREDS')
     if not creds_json:
-        log("ERROR: GOOGLE_SHEETS_CREDS environment variable not set")
-        log("Get credentials from Google Cloud Console -> Service Accounts")
-        sys.exit(1)
+        raise RuntimeError(
+            "GOOGLE_SHEETS_CREDS environment variable not set. "
+            "Get credentials from Google Cloud Console -> Service Accounts."
+        )
 
     log("Authenticating with Google Sheets...")
     client = authenticate_sheets(creds_json)
 
     # ── Open Spreadsheet ──
     try:
-        spreadsheet = client.open_by_key(spreadsheet_id)
+        spreadsheet = _open_spreadsheet(client, spreadsheet_id)
         log(f"Opened spreadsheet: {spreadsheet.title}")
     except Exception as e:
-        log(f"ERROR: Could not open spreadsheet: {e}")
-        log("Make sure the sheet is shared with your service account email")
-        sys.exit(1)
+        raise RuntimeError(
+            f"Could not open spreadsheet: {e}. Make sure the sheet is "
+            f"shared with the service account email."
+        ) from e
 
     # ── Get or Create Worksheet ──
     try:
@@ -570,11 +599,13 @@ def write_exclude_tab(
         spreadsheet_id: Google Sheets ID (from URL).
         sheet_name: Worksheet name (default: "Exclude").
 
-    Returns:
+        Returns:
         The number of rows actually appended.
 
     Raises:
-        SystemExit: If credentials are missing.
+        RuntimeError: If credentials are missing. A plain exception, not
+            SystemExit -- see write_to_sheet() above for why that matters
+            to the orchestrator's own error handling.
     """
     if not jobs:
         log("No excluded jobs to write.")
@@ -582,11 +613,10 @@ def write_exclude_tab(
 
     creds_json = os.environ.get('GOOGLE_SHEETS_CREDS')
     if not creds_json:
-        log("ERROR: GOOGLE_SHEETS_CREDS environment variable not set")
-        sys.exit(1)
+        raise RuntimeError("GOOGLE_SHEETS_CREDS environment variable not set")
 
     client = authenticate_sheets(creds_json)
-    spreadsheet = client.open_by_key(spreadsheet_id)
+    spreadsheet = _open_spreadsheet(client, spreadsheet_id)
 
     # ── Get or Create Worksheet ──
     try:

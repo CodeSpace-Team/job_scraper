@@ -201,8 +201,19 @@ def main() -> None:
         sys.exit(1)
 
     # ── PHASE 3: WRITE TO SHEETS ─────────────────────────────────────────────
+    # A failure here does not end the run early. It used to -- write_to_sheet
+    # raised SystemExit directly on failure, which is invisible to a plain
+    # "except Exception", so it skipped straight past this handler, past the
+    # Exclude tab below, and past the summary. That is how a run finished all
+    # its real work and still walked away with nothing written anywhere: a
+    # single dropped connection to Google took the whole run down with it.
+    # Now a failure here is recorded and the run carries on -- the Exclude
+    # tab and the summary still deserve their chance to run.
 
     log("\n[PHASE 3] WRITING TO GOOGLE SHEETS...")
+
+    sheet_url = None
+    jobs_write_failed = False
 
     try:
         sheet_url = sheets.write_to_sheet(
@@ -213,6 +224,7 @@ def main() -> None:
         log(f"✓ SHEETS UPDATE COMPLETE")
         log(f"  Sheet URL: {sheet_url}")
     except Exception as e:
+        jobs_write_failed = True
         log(f"✗ Sheets write error: {e}")
         log("  Make sure:")
         log("  1. GOOGLE_SHEETS_CREDS is set correctly")
@@ -220,7 +232,6 @@ def main() -> None:
         log("  3. Spreadsheet ID is correct")
         save_jobs(all_jobs, "data/cache/combined_jobs_fallback.json")
         log("  Saved fallback copy to data/cache/combined_jobs_fallback.json")
-        sys.exit(1)
 
     # ── PHASE 3.5: EXCLUDE TAB ───────────────────────────────────────────────
     # Handled separately from the Jobs write above. The Jobs sheet is the
@@ -262,6 +273,15 @@ def main() -> None:
         log("Sheet URL: Not available (write failed)")
     log("\nNext run: Tomorrow at the same time (via GitHub Actions)")
     log("=" * 70)
+
+    # The Jobs sheet not being updated is still a run that needs a red X in
+    # GitHub Actions -- but only now, after every step that could still
+    # salvage something from the run has had its turn.
+    if jobs_write_failed:
+        log("\n⚠ The Jobs sheet was NOT updated this run.")
+        log("  A rescue copy of today's jobs is saved in")
+        log("  data/cache/combined_jobs_fallback.json")
+        sys.exit(1)
 
 
 if __name__ == '__main__':
