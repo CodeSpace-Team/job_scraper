@@ -33,7 +33,7 @@ except ImportError:
     HAS_PNET = False
 
 from src.enrichment import enhancer
-from src.pipeline import dedupe, experience, levels, screening
+from src.pipeline import dedupe, experience, levels, roles, screening
 from src.writers import sheets
 from src.utils import log, save_jobs
 
@@ -88,7 +88,10 @@ def main() -> None:
     if not args.skip_indeed:
         log("\n--- Indeed ---")
         try:
+            todays_terms = [t.phrase for t in roles.terms_for_today()]
+            log(f"  Searching {len(todays_terms)} terms across all seven tracks (F7)")
             indeed_jobs = indeed.scrape_indeed(
+                search_terms=todays_terms,
                 results_per_term=args.indeed_results,
                 hours_old=720  # 30 days
             )
@@ -171,17 +174,22 @@ def main() -> None:
     else:
         log("\n[PHASE 2] ENRICHMENT SKIPPED (--skip-enrichment flag)")
 
-    # ── PHASE 2.4: LEVELS AND YEARS (F2, F3) ─────────────────────────────────
+    # ── PHASE 2.4: LEVELS, YEARS AND ROLE TYPE (F2, F3, F7) ──────────────────
     # Runs after enrichment so the rules get the last word over the AI, and
     # before screening because F4 will decide what to drop from these fields.
+    # Role type is classified here too, so it can sit next to the AI's own
+    # role label ('primary_role') in the run log -- screening still reads
+    # the AI's label for now, this is only being watched alongside it.
 
-    log("\n[PHASE 2.4] WORKING OUT LEVELS AND YEARS OF EXPERIENCE...")
+    log("\n[PHASE 2.4] WORKING OUT LEVELS, YEARS AND ROLE TYPE...")
 
     all_jobs = experience.apply_experience(all_jobs)
     all_jobs = levels.apply_levels(all_jobs)
+    all_jobs = roles.apply_roles(all_jobs)
 
     experience.log_experience(all_jobs)
     levels.log_levels(all_jobs)
+    roles.log_roles(all_jobs)
 
     save_jobs(all_jobs, "data/cache/combined_jobs_leveled.json")
 

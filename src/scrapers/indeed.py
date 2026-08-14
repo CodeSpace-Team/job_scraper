@@ -379,6 +379,7 @@ def scrape_indeed(
             # ── Build Job Object ──
             all_jobs.append({
                 "source": "indeed",
+                "search_term": term,
                 "title": clean_text(_safe_get_row_value(row, "title", "")),
                 "company": company,
                 "company_logo": str(_safe_get_row_value(row, "company_logo", "")),
