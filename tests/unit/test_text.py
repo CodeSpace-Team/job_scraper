@@ -17,6 +17,9 @@ Why these tests matter:
   - Deduplication and comparisons.
 - Truncation ensures that we don't exceed field limits (e.g., sheet columns).
 """
+import pytest
+
+from src.utils.text import clean_text
 from src.utils.text import clean_text
 
 
@@ -186,6 +189,49 @@ def test_clean_text_only_spaces():
     """
     result = clean_text("   ")
     assert result == ""
+
+@pytest.mark.parametrize("escaped,expected", [
+    ("2\\-4 years' relevant experience", "2-4 years' relevant experience"),
+    ("5\\+ years experience in Java", "5+ years experience in Java"),
+    ("**Engineer** with 3\\-4 years", "**Engineer** with 3-4 years"),
+    ("at least 3\\-5 years experience", "at least 3-5 years experience"),
+])
+def test_clean_text_unescapes_markdown_punctuation(escaped, expected):
+    """
+    Indeed descriptions come back through python-jobspy as Markdown,
+    converted from the original HTML. That conversion escapes ordinary
+    hyphens and plus signs with a backslash, to stop them being read as a
+    Markdown list marker or emphasis.
+
+    Scenario:
+    - "2-4 years" arrives from the scraper as "2\\-4 years".
+    - "5+ years" arrives as "5\\+ years".
+
+    Why this matters:
+    - The years-of-experience rules in src/pipeline/experience.py search
+      for a plain hyphen or plus next to the word "years". A backslash
+      sitting in between breaks that search silently: "2\\-4 years" was
+      being read as 4 instead of 2, and "5\\+ years" was not being read
+      at all. A wrong number here is worse than a blank one, because F4
+      drops jobs on it.
+
+    Edge cases covered:
+    - An escaped hyphen inside a range.
+    - An escaped plus sign.
+    - Markdown bold markers ("**") elsewhere in the same string, which
+      are noise but not a source of wrong data, so they are cleaned up
+      too rather than left to clutter the evidence shown to a reviewer.
+    """
+    assert clean_text(escaped) == expected
+
+
+def test_clean_text_leaves_a_real_backslash_alone():
+    """
+    A backslash not followed by a Markdown-special character is not
+    Markdown escaping, so it is left as it was found.
+    """
+    result = clean_text("Experience with C:\\Users paths")
+    assert result == "Experience with C:\\Users paths"
 
 
 def test_clean_text_special_chars():

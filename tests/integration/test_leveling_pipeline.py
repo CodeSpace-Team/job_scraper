@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 
 import pytest
+from src.utils.text import clean_text
 
 from src.pipeline.experience import apply_experience, fill_rate
 from src.pipeline.levels import (
@@ -306,3 +307,42 @@ def test_the_cache_file_carries_the_audit_fields(processed, tmp_path):
         assert "level_confidence" in job
         assert "years_source" in job
         assert "years_evidence" in job
+
+# ─── The scraper's own text, escaped and all ────────────────────────────────
+# python-jobspy hands Indeed descriptions back as Markdown, which escapes
+# ordinary hyphens and plus signs. clean_text() undoes that before the text
+# ever reaches F3 -- these check the two stages together, on wording taken
+# directly from a live run.
+
+def test_a_real_escaped_range_is_read_correctly():
+    """
+    "Technical Developer - Fresh Foods" on the run of 14 August was dropped
+    for asking for 4+ years. The ad actually said 2-4, and 2 is within the
+    cohort -- the escaped hyphen from Markdown conversion was read as if the
+    upper number were the one that mattered, which is the opposite of what
+    F3 is documented to do.
+    """
+    description = clean_text(
+        "...best practices. * 2\\-4 years' relevant experience in food..."
+    )
+    job = ad("Technical Developer", description, company="Fresh Foods")
+
+    processed = apply_experience([job])
+
+    assert processed[0]["experience_years"] == 2
+
+
+def test_a_real_escaped_plus_is_still_read():
+    """
+    "Quality Assurance Engineer" asked for "3-4 years" elsewhere in the same
+    ad, in the same escaped form -- checked here as a plus sign instead,
+    since an escaped "\\+" was not being read as a number at all.
+    """
+    description = clean_text(
+        "**Engineer** with 5\\+ years of experience to strengthen our team."
+    )
+    job = ad("QA Engineer", description)
+
+    processed = apply_experience([job])
+
+    assert processed[0]["experience_years"] == 5
