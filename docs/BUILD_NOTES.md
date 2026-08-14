@@ -321,3 +321,62 @@ We have not seen this run against live data yet. The counts from the first run a
 | `tests/unit/test_dedupe.py` | 47 tests, including the "(Pty) Ltd" case |
 
 ---
+
+## F7 — Searching all seven role tracks
+
+**Done:** 14 August 2026
+
+### The problem
+
+The scraper only ever searched Indeed for six phrases, all variations of "software developer" — Technical Support, DevOps/Cloud, QA/Testing, Business Analysis, Mobile and Security were never searched for at all, and neither were internship, learnership or graduate-programme phrasings. F4 showed the board only gets about 86 jobs a day and most are repeats — filtering was no longer the bottleneck, supply was, and six of the seven tracks graduates are meant to see were invisible to the pipeline the whole time.
+
+### What we built
+
+Two things, both from a new module, `roles.py`.
+
+A fixed list of the seven tracks from the brief's appendix, and about 40 search terms grouped by track. Core terms — the two biggest tracks, software development and technical support — run every day; the rest alternate between even and odd days, so the whole set is covered every two days without running 40 searches on top of the six we already had, every single morning. A normal day now searches 32 terms instead of 6.
+
+And a role classifier that gives every job exactly one of the seven tracks. It reads the title first, falls back to the description when the title says nothing, and only then falls back to whichever search term found the job — a hit from "it internship" is still counted as an IT job even when the ad's own title is just "2026 Programme".
+
+### Why we did it this way
+
+**The title is trusted first, and checked in a fixed order, most specific first.** "Software Test Engineer" is QA work, not Software development, and "Cloud Support Engineer" is DevOps/Cloud, not Technical Support — both share a word with a track they are not. Checking the more specific tracks first is what keeps them apart.
+
+**It refuses to guess.** "Systems Engineer" says nothing about which of the seven tracks it is, and gets left undecided rather than assigned to whichever track happens to be checked last. The same rule F2 uses for level: an honest "don't know" is worth more than a wrong answer that looks confident.
+
+**We did not let it touch the AI's own field.** F1's screening still reads `primary_role` — the AI's label — to decide keep or drop, and this module deliberately does not write to it. The new `role_type` field sits alongside it instead. This is the same caution F2 used before it dropped the AI's level guess: watch the two side by side on real jobs first, and only then decide whether the rules are solid enough to replace what F1 currently trusts. Swapping it in without that evidence would risk repeating the exact mistake F2 caught — the AI calling a plain "Test Analyst" a lead.
+
+**The cadence spreads the load instead of running everything daily.** Forty searches a day would slow the run down and risk annoying Indeed for no real benefit — most of what a second daily run of the same term would find, F9's deduping would just throw away again. Splitting the set across two days gets full coverage without the cost.
+
+### What we chose not to do
+
+**We did not swap F1 over to the new role classification.** That is a separate, better-informed decision for later, once `role_type` has sat next to the AI's label on a few real days of jobs. Doing it now would mean trusting a rule we have only tested against made-up titles, on the same day we ship it — exactly the situation that burned us with F2's AI fallback.
+
+**We did not run every search term every day.** The brief does not ask for that, and doing it would cost more in scraping time and AI enrichment for a benefit we do not think is there — most of the extra finds would be the same jobs the daily terms already caught.
+
+### One thing that needed care
+
+More search terms means more raw jobs scraped, which means more jobs sent to the AI for enrichment, which costs real money against CodeSpace's own Anthropic account. Working through the actual pricing (Claude Haiku 4.5, the model the enrichment step uses): a normal day before this shipped cost around $0.23. Our estimate for a normal day under the new term list comes out somewhere between $0.49 and $0.97 — against a $1 daily cap. That is close enough to be a real risk, not a rounding error, so the first few live runs need watching for cost as much as for coverage.
+
+### How to check it is working
+
+- **In the run log**, `[PHASE 1]` now prints how many terms are being searched that day. `[PHASE 2.4]` prints the role breakdown across all seven tracks, how many jobs got no track at all, and which rule decided each one (title, description, or search term).
+- **Watch for a track stuck at zero.** If one of the seven tracks comes back empty run after run, that likely means its search terms need adjusting, not that the track has no jobs in South Africa right now.
+- **Watch the AI enrichment cost** on the first few runs, given how close the estimate sits to the daily cap.
+
+### Still open
+
+**We have not seen this run against live data yet.** The 32-term cadence and the classifier are both built and tested against made-up titles; how well they hold up, and what the real enrichment cost turns out to be, needs a live run to know.
+
+**F1 still runs on the AI's label, not on `role_type`.** Once there is a few days of the two sitting side by side in the run log, that becomes its own small decision — not blocked on anything else in F7.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `src/pipeline/roles.py` | The seven tracks, the search terms and their cadence, and the classifier |
+| `src/scrapers/indeed.py` | Records which search term found each job |
+| `src/core/orchestrator.py` | Feeds the day's terms to the scraper, and classifies role type in Phase 2.4 |
+| `tests/unit/test_roles.py` | 42 tests, including the track-overlap cases and the `primary_role` boundary |
+
+---
