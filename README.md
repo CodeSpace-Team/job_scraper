@@ -25,7 +25,7 @@ Indeed (JobSpy) →  Scrape  →  AI enrichment  →  Dedup by URL  →  Google 
                               (Claude Haiku)                      (append-only)
 ```
 
-1. **Scrape** — OfferZen's public API is paginated in full and filtered to SA locations; Indeed is searched via JobSpy across six developer-focused terms with a 30-day window. Raw results are cached as JSON under `data/cache/`.
+1. **Scrape** — OfferZen's public API is paginated in full and filtered to SA locations; Indeed is searched via JobSpy across six developer-focused terms with a 30-day window. Raw results are cached as JSON under `backend/data/cache/`.
 2. **Enrich** — jobs are sent to Claude (Haiku) in batches of 5. For each job it extracts: normalized role category, required skills, nice-to-have skills, years of experience (when stated), level (intern/junior/mid/senior/lead/principal), and a one-sentence summary. Failures are non-fatal: jobs continue un-enriched rather than blocking the run.
 3. **Publish** — new jobs (by URL) are appended to the sheet with formatting; existing rows are never overwritten.
 
@@ -38,29 +38,38 @@ Date Added to Sheet · Date Job Posted · Job Title · Company · Role Category 
 ```
 job_scraper/
 ├── .github/workflows/daily-scrape.yml   # Daily pipeline (GitHub Actions)
-├── run.sh                               # Convenience runner for local use
-├── src/
-│   ├── main.py                          # CLI entry point (python -m src.main)
-│   ├── core/orchestrator.py             # Pipeline: scrape → enrich → publish
-│   ├── scrapers/
-│   │   ├── offerzen.py                  # OfferZen public API
-│   │   ├── indeed.py                    # Indeed via JobSpy
-│   │   ├── linkedin.py                  # LinkedIn via JobSpy (skipped in CI)
-│   │   └── pnet.py                      # PNet (skipped in CI)
-│   ├── enrichment/enhancer.py           # Claude AI enrichment
-│   ├── writers/sheets.py                # Google Sheets writer (append-only, dedup)
-│   └── utils/                           # logging, retry, dates, text, io, http
-├── tests/
-│   ├── unit/                            # utils tests
-│   └── integration/                     # per-scraper tests
-└── docs/                                # setup guide, architecture, quick start
+├── backend/
+│   ├── run.sh                           # Convenience runner for local use
+│   ├── skills.json                      # The one official skills list (F5)
+│   ├── src/
+│   │   ├── main.py                      # CLI entry point (python -m src.main)
+│   │   ├── core/orchestrator.py         # Pipeline: scrape → enrich → publish
+│   │   ├── pipeline/                    # Screening, levels, dedupe, roles, skills
+│   │   ├── scrapers/
+│   │   │   ├── offerzen.py              # OfferZen public API
+│   │   │   ├── indeed.py                # Indeed via JobSpy
+│   │   │   ├── linkedin.py              # LinkedIn via JobSpy (skipped in CI)
+│   │   │   └── pnet.py                  # PNet (skipped in CI)
+│   │   ├── enrichment/enhancer.py       # Claude AI enrichment
+│   │   ├── writers/sheets.py            # Google Sheets writer (append-only, dedup)
+│   │   └── utils/                       # logging, retry, dates, text, io, http
+│   ├── scripts/morning_check.py         # Reads a run's saved files, prints one verdict
+│   ├── tests/
+│   │   ├── unit/
+│   │   └── integration/
+│   └── data/                            # Local run cache and QA output (not committed)
+├── frontend/                            # Job board (F6, not yet built)
+└── docs/                                # Build notes, setup guide, architecture
 ```
+
+All backend commands below assume you're in `backend/` — `cd backend` first.
 
 ## Running it
 
 ### Full pipeline (as CI runs it)
 
 ```bash
+cd backend
 export ANTHROPIC_API_KEY="sk-ant-..."
 export GOOGLE_SHEETS_CREDS='{"type":"service_account",...}'
 export PYTHONPATH=.
@@ -73,6 +82,7 @@ Useful flags: `--skip-offerzen`, `--skip-indeed`, `--skip-linkedin`, `--skip-pne
 ### Individual pieces
 
 ```bash
+cd backend
 python -m src.scrapers.offerzen -o data/cache/offerzen_jobs.json
 python -m src.scrapers.indeed --results 50 --days 14
 python -m src.enrichment.enhancer -i data/cache/offerzen_jobs.json
@@ -82,6 +92,7 @@ python -m src.writers.sheets -i data/cache/*_enriched.json -s "<SHEET_ID>"
 ### Tests
 
 ```bash
+cd backend
 pip install -r requirements.txt
 pytest tests/
 ```

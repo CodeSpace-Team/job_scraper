@@ -71,13 +71,9 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple
 
+from src.utils import clean_text, log, parse_date, parse_date_for_sort, safe_get
 from src.utils import (
-    log,
-    clean_text,
-    parse_date,
-    parse_date_for_sort,
-    retry,
-    safe_get
+    retry
 )
 
 try:

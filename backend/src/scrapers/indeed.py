@@ -68,12 +68,8 @@ except ImportError:
     print("Missing: pip install requests")
     sys.exit(1)
 
+from src.utils import clean_text, log, parse_date, parse_date_for_sort, save_jobs
 from src.utils import (
-    log,
-    parse_date,
-    clean_text,
-    save_jobs,
-    parse_date_for_sort,
     retry
 )
 

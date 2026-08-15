@@ -69,7 +69,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 # ─── Direct imports from modules to avoid missing exports ────────────────
-from src.utils import log, retry, load_jobs, save_jobs
+from src.utils import load_jobs, log, save_jobs
+from src.utils import retry
 
 
 # ─── Constants ──────────────────────────────────────────────────────────────

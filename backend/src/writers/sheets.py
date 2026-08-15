@@ -67,7 +67,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple, Union
 
 from src.pipeline.dedupe import is_comparable, key_from_row, duplicate_key
-from src.utils import log, retry
+from src.utils import log
+from src.utils import retry
 
 try:
     import gspread

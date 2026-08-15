@@ -21,7 +21,10 @@ jobs:
   scrape-and-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    
+    defaults:
+      run:
+        working-directory: backend
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -87,7 +90,7 @@ jobs:
         with:
           name: job-data-${{ github.run_number }}
           path: |
-            data/cache/*.json
+            backend/data/cache/*.json
           retention-days: 7
       
       - name: Notify on failure

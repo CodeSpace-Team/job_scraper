@@ -48,14 +48,9 @@ except ImportError:
     print("ERROR: requests not installed. Run: pip install requests")
     sys.exit(1)
 
+from src.utils import SA_KEYWORDS, clean_text, log, parse_date, safe_get, save_jobs
 from src.utils import (
-    log,
-    parse_date,
-    clean_text,
-    save_jobs,
-    SA_KEYWORDS,
-    retry,
-    safe_get
+    retry
 )
 
 # ─── Constants ──────────────────────────────────────────────────────────────

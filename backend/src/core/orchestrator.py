@@ -22,7 +22,9 @@ import sys
 import time
 from datetime import datetime
 
-from src.scrapers import offerzen, indeed, linkedin
+from src.pipeline import dedupe, experience, levels, roles, screening
+from src.scrapers import indeed, linkedin
+from src.scrapers import offerzen
 
 # PNet is optional - handle gracefully
 try:
@@ -33,7 +35,7 @@ except ImportError:
     HAS_PNET = False
 
 from src.enrichment import enhancer
-from src.pipeline import dedupe, experience, levels, roles, screening, skills
+from src.pipeline import skills
 from src.writers import sheets
 from src.utils import log, save_jobs
 
