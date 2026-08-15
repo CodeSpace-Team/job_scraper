@@ -380,3 +380,68 @@ More search terms means more raw jobs scraped, which means more jobs sent to the
 | `tests/unit/test_roles.py` | 42 tests, including the track-overlap cases and the `primary_role` boundary |
 
 ---
+
+## F5 — One official skills list
+
+**Done:** 15 August 2026
+
+### The problem
+
+Two problems, one file.
+
+There was no single answer to "what does this skill get called?" A job feed might hand over "JS", the AI might write "ReactJS", and a graduate filtering the board by "React" would miss both. Nothing forced the sheet to speak one vocabulary.
+
+And every job's skills were worked out by the AI, every time, even when the answer was sitting in plain sight in the title — "Junior JavaScript Developer" does not need an API call to know it wants JavaScript. The 14 August billing scare (F7's extra search terms pushing enrichment close to CodeSpace's own $1 daily cap) made that waste harder to ignore.
+
+### What we built
+
+One file, `skills.json`, at the repository root — 130 skills, each with its official name, a category, and every spelling we know it goes by. It is the only skills list in the project; the keyword matcher, the AI-output tidy-up, and eventually the sheet and the board's own skill picker all read names through it.
+
+A free, offline keyword matcher that runs over the job title and description before the AI ever sees the job, as a new Phase 1.7. It records what it found on `must_have_skills`, and two new fields: `skills_source` (did this come from a keyword match, the AI, or nothing at all) and `needs_ai_skills` (did the keyword match find fewer than three skills).
+
+A canonicaliser that maps any spelling to the official one — "JS" becomes "JavaScript", "reactjs" becomes "React" — applied both to what the keyword matcher finds and, after enrichment runs, to whatever the AI wrote. Whichever one supplied the final answer, it comes out the same way.
+
+### Why we did it this way
+
+**Short acronyms only match in capitals.** JS, SQL, AWS and REST are common enough as ordinary words or word-fragments that matching them case-insensitively would light up on nonsense — "the rest of the team" is not a REST APIs hit. Anything five letters or fewer, all capitals, matches case-sensitively; everything else does not need to.
+
+**Punctuation-heavy names keep their shape.** C#, .NET, CI/CD and Node.js all need characters either side of a match to not count as a boundary, or the match either fails outright or clips off the part that matters.
+
+**A few names only count with a nearby context word.** "Go" and "Swift" are both real English words and real technology names. "You will build apps in Swift with UIKit experience" counts; "Taylor Swift is playing this weekend" does not. Both need a technical word — develop, engineer, API, framework, and the like — within about sixty characters before they count as a match.
+
+**"Go" does not match on its own name at all.** Even with the context check, "Go" is too common a word to trust bare — "go the extra mile", "go-getters who close deals" would both light it up. Its aliases (Golang, Go Lang) carry the matching instead.
+
+**Canonicalisation runs on the AI's output too, not just the keyword matches.** If only the keyword matcher were tidied, the sheet would show "JavaScript" from a keyword match sitting next to "JS" from the AI on a different row — the exact problem this feature exists to fix, just moved one step later.
+
+### What we chose not to do
+
+**We are not skipping AI enrichment for anything, yet.** The whole reason F5 exists is to cut down what gets sent to the AI, and it would have been easy to wire `needs_ai_skills` straight into a skip. We are deliberately not doing that today: as put when we scoped this, cost reduction is "a separate decision for later, that would depend if skip enrichment actual provide enough room for keyword matching." So for now every job still goes through enrichment exactly as before — F5 only records `needs_ai_skills` and `skills_source` alongside the result, so that once there is real data on how much the keyword matcher is finding on its own, the skip decision can be made with evidence instead of a guess. This is the same discipline F2 and F7 used before them.
+
+### One thing that needed care
+
+The first version of the AI-output tidy-up decided whether to relabel a job's `skills_source` as `"ai"` by checking whether it was **not already** `"keyword"`. That is circular — once the keyword matcher had labelled a job `"keyword"`, that check could never flip it, even after the AI had gone on to overwrite `must_have_skills` outright with its own list. Enrichment does not touch `skills_source` when it succeeds, only `must_have_skills`, so the label would have quietly kept lying about where a job's skills actually came from on every job the keyword matcher had already found something for.
+
+Caught before shipping, while writing the tests for it rather than on a live run. The fix checks for `blurb` instead — the one field only enrichment ever sets, whether or not a job already had a `skills_source`. No blurb means enrichment never touched the job, and whatever the keyword matcher had already put there survives untouched.
+
+### How to check it is working
+
+- **In the run log**, `[PHASE 1.7]` prints the keyword fill rate before the AI runs at all — how many jobs already have enough skills without costing anything. `[PHASE 2.4]` prints it again after enrichment and the tidy-up, broken down by source: keyword, ai, or none.
+- **Watch the "keyword" share over a few real days.** That number is the evidence the deferred cost decision needs — the higher it climbs, the more room there is to start skipping enrichment for jobs it already covers.
+- **In the sheet**, `must_have_skills` should never show two spellings of the same thing across different rows. If "JS" ever appears instead of "JavaScript", something is reaching the sheet without going through this module.
+
+### Still open
+
+**We have not seen this run against live data yet.** The matcher and the tidy-up are both tested against made-up ads and a full pipeline smoke test, not a real day's worth of postings.
+
+**The cost-reduction decision is still open, on purpose.** Once there are a few real days of `skills_source` and `needs_ai_skills` in the run log, that becomes its own decision — whether keyword matching alone is finding enough to skip the AI for some jobs, and by how much it would cut the daily bill.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `skills.json` | The one official skills list — 130 skills, names and aliases |
+| `src/pipeline/skills.py` | The keyword matcher, the canonicaliser, and the AI-output tidy-up |
+| `src/core/orchestrator.py` | Runs keyword matching as Phase 1.7, before the AI, and tidies the AI's output in Phase 2.4 |
+| `tests/unit/test_skills.py` | 40 tests, including the three `skills_source` scenarios the bug fix depends on |
+
+---
