@@ -33,7 +33,7 @@ except ImportError:
     HAS_PNET = False
 
 from src.enrichment import enhancer
-from src.pipeline import dedupe, experience, levels, roles, screening
+from src.pipeline import dedupe, experience, levels, roles, screening, skills
 from src.writers import sheets
 from src.utils import log, save_jobs
 
@@ -155,6 +155,22 @@ def main() -> None:
     all_jobs, dupe_counts = dedupe.deduplicate(all_jobs)
     dedupe.log_dedupe(dupe_counts)
 
+    # ── PHASE 1.7: SKILLS MATCHING (F5) ──────────────────────────────────────
+    # Free, offline keyword matching, before enrichment. Two reasons to run
+    # it here rather than after: the AI's own prompt shows it what this step
+    # already found ("Current skills: ..."), which gives it something to
+    # confirm or extend instead of starting blank; and a job whose feed
+    # never carried a skills field at all still enters enrichment with
+    # something in it. Nothing is skipped on the strength of this yet --
+    # 'needs_ai_skills' is recorded on every job so there is a real, dated
+    # record to decide that from later, the same way F7's role_type sits
+    # next to the AI's label before anyone decides to trust it over it.
+
+    log("\n[PHASE 1.7] MATCHING SKILLS BY KEYWORD...")
+    all_jobs = skills.apply_keyword_skills(all_jobs)
+    skills.log_fill_rate(all_jobs)
+
+
     # ── PHASE 2: ENRICHMENT ──────────────────────────────────────────────────
 
     if not args.skip_enrichment:
@@ -182,22 +198,29 @@ def main() -> None:
     else:
         log("\n[PHASE 2] ENRICHMENT SKIPPED (--skip-enrichment flag)")
 
-    # ── PHASE 2.4: LEVELS, YEARS AND ROLE TYPE (F2, F3, F7) ──────────────────
+    # ── PHASE 2.4: LEVELS, YEARS, ROLE TYPE AND SKILLS (F2, F3, F5, F7) ──────
     # Runs after enrichment so the rules get the last word over the AI, and
     # before screening because F4 will decide what to drop from these fields.
     # Role type is classified here too, so it can sit next to the AI's own
     # role label ('primary_role') in the run log -- screening still reads
     # the AI's label for now, this is only being watched alongside it.
+    # Skills get tidied here too: enrichment overwrites 'must_have_skills'
+    # outright when it runs, so the keyword matcher's spellings and its
+    # record of where the field's value actually came from both need
+    # re-checking against whatever enrichment just did.
 
-    log("\n[PHASE 2.4] WORKING OUT LEVELS, YEARS AND ROLE TYPE...")
+    log("\n[PHASE 2.4] WORKING OUT LEVELS, YEARS, ROLE TYPE AND SKILLS...")
 
     all_jobs = experience.apply_experience(all_jobs)
     all_jobs = levels.apply_levels(all_jobs)
     all_jobs = roles.apply_roles(all_jobs)
+    for job in all_jobs:
+        skills.normalise_ai_skills(job)
 
     experience.log_experience(all_jobs)
     levels.log_levels(all_jobs)
     roles.log_roles(all_jobs)
+    skills.log_fill_rate(all_jobs)
 
     save_jobs(all_jobs, "data/cache/combined_jobs_leveled.json")
 

@@ -1,0 +1,675 @@
+{
+  "version": 1,
+  "updated": "2026-08-12",
+  "description": "The single official skills list for the job scraper. Every part of the system reads this file: the scraper's keyword matcher, the AI enrichment normaliser, the Google Sheets writer, the published jobs.json and the board's skill picker. There must never be a second skills list anywhere in the codebase.",
+  "matching_rules": {
+    "case_sensitive_acronyms": "An alias written in all capitals with 5 or fewer letters (JS, TS, SQL, AWS, REST) is matched case-sensitively, so the English words 'rest' and 'it' do not produce false hits.",
+    "boundaries": "Aliases are matched on non-identifier boundaries rather than plain word boundaries, so 'C#', '.NET', 'CI/CD' and 'Node.js' match correctly and 'Java' never matches inside 'JavaScript'.",
+    "requires_context": "A skill flagged requires_context only counts when a technical context word (developer, engineer, experience, stack, programming, ...) appears nearby. Used for short, ambiguous names such as Swift.",
+    "name_matches": "A skill with name_matches false is only found through its aliases, never its own name. Used for Go, which is far too common as an English word."
+  },
+  "skills": [
+    {
+      "name": "JavaScript",
+      "category": "Languages & Core Web",
+      "aliases": ["JS", "ECMAScript", "ES6", "ES2015", "Vanilla JavaScript", "Java Script"]
+    },
+    {
+      "name": "HTML/CSS",
+      "category": "Languages & Core Web",
+      "aliases": ["HTML", "CSS", "HTML5", "CSS3", "HTML 5", "CSS 3", "HTML & CSS", "HTML and CSS"]
+    },
+    {
+      "name": "React",
+      "category": "Frontend",
+      "aliases": ["ReactJS", "React.js", "React JS", "React 18"]
+    },
+    {
+      "name": "Git",
+      "category": "Ways of Working",
+      "aliases": ["GitHub", "GitLab", "Bitbucket", "version control", "source control"]
+    },
+    {
+      "name": "REST APIs",
+      "category": "Backend",
+      "aliases": ["REST", "RESTful", "RESTful API", "RESTful APIs", "REST API", "Web API", "Web APIs", "API integration"]
+    },
+    {
+      "name": "Testing/Debugging",
+      "category": "QA & Testing",
+      "aliases": ["debugging", "unit testing", "unit tests", "troubleshooting code", "fault finding"]
+    },
+    {
+      "name": "Agile/Jira",
+      "category": "Ways of Working",
+      "aliases": ["Agile", "Scrum", "Jira", "Kanban", "agile methodologies", "sprint planning", "stand-ups", "Azure Boards"]
+    },
+    {
+      "name": "TypeScript",
+      "category": "Languages & Core Web",
+      "aliases": ["TS", "Type Script"]
+    },
+    {
+      "name": "Python",
+      "category": "Languages & Core Web",
+      "aliases": ["Python3", "Python 3"]
+    },
+    {
+      "name": "SQL (MySQL/Postgres)",
+      "category": "Data",
+      "aliases": ["SQL", "MySQL", "PostgreSQL", "Postgres", "T-SQL", "TSQL", "MSSQL", "MS SQL", "SQL Server", "PL/SQL", "relational database", "relational databases", "MariaDB"]
+    },
+    {
+      "name": "MongoDB/NoSQL",
+      "category": "Data",
+      "aliases": ["MongoDB", "Mongo", "NoSQL", "document database", "Cosmos DB", "CosmosDB", "DynamoDB", "Firestore"]
+    },
+    {
+      "name": "C#/.NET",
+      "category": "Languages & Core Web",
+      "aliases": ["C#", "C Sharp", "CSharp", ".NET", "dotnet", "dot net", ".NET Core", ".NET 8", "ASP.NET", "ASP.NET Core", "Entity Framework", "Blazor", "WPF", "VB.NET"]
+    },
+    {
+      "name": "Node.js",
+      "category": "Backend",
+      "aliases": ["Node", "NodeJS", "Node JS"]
+    },
+    {
+      "name": "Java",
+      "category": "Languages & Core Web",
+      "aliases": ["Core Java", "Java SE", "Java EE", "J2EE", "JDK"]
+    },
+    {
+      "name": "PHP",
+      "category": "Languages & Core Web",
+      "aliases": ["PHP7", "PHP 7", "PHP8", "PHP 8"]
+    },
+    {
+      "name": "Vue.js",
+      "category": "Frontend",
+      "aliases": ["Vue", "VueJS", "Vue JS", "Vue 3", "Nuxt", "Nuxt.js"]
+    },
+    {
+      "name": "Docker",
+      "category": "Cloud & DevOps",
+      "aliases": ["containers", "containerisation", "containerization", "Docker Compose", "containerised", "containerized"]
+    },
+    {
+      "name": "Azure",
+      "category": "Cloud & DevOps",
+      "aliases": ["Microsoft Azure", "MS Azure", "Azure Cloud", "Azure Functions", "Azure App Service"]
+    },
+    {
+      "name": "CI/CD",
+      "category": "Cloud & DevOps",
+      "aliases": ["CICD", "CI CD", "continuous integration", "continuous delivery", "continuous deployment", "build pipeline", "build pipelines", "deployment pipeline"]
+    },
+    {
+      "name": "Angular",
+      "category": "Frontend",
+      "aliases": ["AngularJS", "Angular JS", "Angular 2+", "Angular 17"]
+    },
+    {
+      "name": "AWS",
+      "category": "Cloud & DevOps",
+      "aliases": ["Amazon Web Services", "EC2", "S3 bucket", "AWS Lambda", "CloudFormation"]
+    },
+    {
+      "name": "Kubernetes",
+      "category": "Cloud & DevOps",
+      "aliases": ["K8s", "EKS", "AKS", "GKE", "OpenShift"]
+    },
+
+    {
+      "name": "Next.js",
+      "category": "Frontend",
+      "aliases": ["NextJS", "Next JS"]
+    },
+    {
+      "name": "Redux",
+      "category": "Frontend",
+      "aliases": ["Redux Toolkit", "state management"]
+    },
+    {
+      "name": "jQuery",
+      "category": "Frontend",
+      "aliases": ["JQuery"]
+    },
+    {
+      "name": "Bootstrap",
+      "category": "Frontend",
+      "aliases": ["Bootstrap 5"]
+    },
+    {
+      "name": "Tailwind CSS",
+      "category": "Frontend",
+      "aliases": ["Tailwind", "TailwindCSS"]
+    },
+    {
+      "name": "Sass/SCSS",
+      "category": "Frontend",
+      "aliases": ["Sass", "SCSS", "LESS CSS"]
+    },
+    {
+      "name": "Responsive Design",
+      "category": "Frontend",
+      "aliases": ["responsive web design", "mobile-first", "mobile first", "cross-browser"]
+    },
+    {
+      "name": "Accessibility (WCAG)",
+      "category": "Frontend",
+      "aliases": ["WCAG", "a11y", "web accessibility", "accessible design"]
+    },
+    {
+      "name": "UI/UX",
+      "category": "Frontend",
+      "aliases": ["UX", "user experience", "user interface design", "UI design"]
+    },
+    {
+      "name": "Figma",
+      "category": "Frontend",
+      "aliases": ["Adobe XD", "design handoff"]
+    },
+    {
+      "name": "WordPress",
+      "category": "Frontend",
+      "aliases": ["WooCommerce", "Wordpress CMS"]
+    },
+
+    {
+      "name": "Django",
+      "category": "Backend",
+      "aliases": ["Django REST Framework", "DRF"]
+    },
+    {
+      "name": "Flask",
+      "category": "Backend",
+      "aliases": []
+    },
+    {
+      "name": "FastAPI",
+      "category": "Backend",
+      "aliases": ["Fast API"]
+    },
+    {
+      "name": "Spring Boot",
+      "category": "Backend",
+      "aliases": ["Spring", "Spring Framework", "Springboot"]
+    },
+    {
+      "name": "Laravel",
+      "category": "Backend",
+      "aliases": ["Symfony"]
+    },
+    {
+      "name": "Express.js",
+      "category": "Backend",
+      "aliases": ["ExpressJS", "Express JS", "Nest.js", "NestJS"]
+    },
+    {
+      "name": "GraphQL",
+      "category": "Backend",
+      "aliases": ["Apollo GraphQL"]
+    },
+    {
+      "name": "Microservices",
+      "category": "Backend",
+      "aliases": ["microservice architecture", "service oriented architecture", "SOA"]
+    },
+    {
+      "name": "Redis",
+      "category": "Backend",
+      "aliases": ["caching layer", "Memcached"]
+    },
+    {
+      "name": "RabbitMQ",
+      "category": "Backend",
+      "aliases": ["message queue", "message broker", "Service Bus"]
+    },
+    {
+      "name": "Kafka",
+      "category": "Backend",
+      "aliases": ["Apache Kafka", "event streaming"]
+    },
+    {
+      "name": "Elasticsearch",
+      "category": "Backend",
+      "aliases": ["Elastic Search", "OpenSearch"]
+    },
+    {
+      "name": "Go",
+      "category": "Languages & Core Web",
+      "aliases": ["Golang", "Go Lang"],
+      "name_matches": false
+    },
+    {
+      "name": "Rust",
+      "category": "Languages & Core Web",
+      "aliases": []
+    },
+    {
+      "name": "Ruby on Rails",
+      "category": "Languages & Core Web",
+      "aliases": ["Ruby", "Rails", "RoR"]
+    },
+    {
+      "name": "C++",
+      "category": "Languages & Core Web",
+      "aliases": ["CPP", "C plus plus"]
+    },
+    {
+      "name": "Delphi",
+      "category": "Languages & Core Web",
+      "aliases": ["Object Pascal"]
+    },
+
+    {
+      "name": "Flutter",
+      "category": "Mobile",
+      "aliases": ["Flutter SDK"]
+    },
+    {
+      "name": "Dart",
+      "category": "Mobile",
+      "aliases": []
+    },
+    {
+      "name": "React Native",
+      "category": "Mobile",
+      "aliases": ["ReactNative"]
+    },
+    {
+      "name": "Kotlin",
+      "category": "Mobile",
+      "aliases": []
+    },
+    {
+      "name": "Swift",
+      "category": "Mobile",
+      "aliases": ["SwiftUI", "Objective-C"],
+      "requires_context": true
+    },
+    {
+      "name": "Android",
+      "category": "Mobile",
+      "aliases": ["Android Studio", "Android SDK", "Jetpack Compose"]
+    },
+    {
+      "name": "iOS",
+      "category": "Mobile",
+      "aliases": ["Xcode", "App Store deployment"]
+    },
+    {
+      "name": "Firebase",
+      "category": "Mobile",
+      "aliases": ["Firebase Auth", "Firebase Cloud Messaging"]
+    },
+    {
+      "name": "Mobile App Deployment",
+      "category": "Mobile",
+      "aliases": ["Play Store", "App Store Connect", "app store release"]
+    },
+
+    {
+      "name": "Terraform",
+      "category": "Cloud & DevOps",
+      "aliases": ["Infrastructure as Code", "IaC", "Bicep", "Pulumi"]
+    },
+    {
+      "name": "Ansible",
+      "category": "Cloud & DevOps",
+      "aliases": ["configuration management", "Chef Puppet"]
+    },
+    {
+      "name": "Jenkins",
+      "category": "Cloud & DevOps",
+      "aliases": ["TeamCity", "Bamboo"]
+    },
+    {
+      "name": "GitHub Actions",
+      "category": "Cloud & DevOps",
+      "aliases": ["GitLab CI", "GitLab CI/CD", "CircleCI"]
+    },
+    {
+      "name": "Azure DevOps",
+      "category": "Cloud & DevOps",
+      "aliases": ["ADO pipelines", "TFS", "Team Foundation Server"]
+    },
+    {
+      "name": "Google Cloud (GCP)",
+      "category": "Cloud & DevOps",
+      "aliases": ["GCP", "Google Cloud Platform", "BigQuery"]
+    },
+    {
+      "name": "Linux",
+      "category": "Support & Infrastructure",
+      "aliases": ["Ubuntu", "Red Hat", "RHEL", "CentOS", "Linux administration"]
+    },
+    {
+      "name": "Bash/Shell Scripting",
+      "category": "Cloud & DevOps",
+      "aliases": ["Bash", "shell scripting", "shell scripts"]
+    },
+    {
+      "name": "PowerShell",
+      "category": "Support & Infrastructure",
+      "aliases": ["PowerShell scripting"]
+    },
+    {
+      "name": "Nginx",
+      "category": "Cloud & DevOps",
+      "aliases": ["Apache HTTP", "reverse proxy", "load balancing"]
+    },
+    {
+      "name": "Monitoring & Observability",
+      "category": "Cloud & DevOps",
+      "aliases": ["Prometheus", "Grafana", "Datadog", "New Relic", "Application Insights", "observability"]
+    },
+    {
+      "name": "Serverless",
+      "category": "Cloud & DevOps",
+      "aliases": ["serverless architecture", "Lambda functions"]
+    },
+
+    {
+      "name": "Manual Testing",
+      "category": "QA & Testing",
+      "aliases": ["manual QA", "exploratory testing", "test execution"]
+    },
+    {
+      "name": "Test Automation",
+      "category": "QA & Testing",
+      "aliases": ["automated testing", "automation testing", "test automation framework"]
+    },
+    {
+      "name": "Selenium",
+      "category": "QA & Testing",
+      "aliases": ["Selenium WebDriver"]
+    },
+    {
+      "name": "Cypress",
+      "category": "QA & Testing",
+      "aliases": []
+    },
+    {
+      "name": "Playwright",
+      "category": "QA & Testing",
+      "aliases": ["Playwright automation"]
+    },
+    {
+      "name": "Jest",
+      "category": "QA & Testing",
+      "aliases": ["Vitest", "Mocha", "Jasmine"]
+    },
+    {
+      "name": "JUnit",
+      "category": "QA & Testing",
+      "aliases": ["NUnit", "xUnit", "PyTest"]
+    },
+    {
+      "name": "Postman",
+      "category": "QA & Testing",
+      "aliases": ["API testing", "Swagger", "SoapUI"]
+    },
+    {
+      "name": "Test Cases & Test Plans",
+      "category": "QA & Testing",
+      "aliases": ["test cases", "test plans", "test scripts", "regression testing", "smoke testing", "UAT", "user acceptance testing"]
+    },
+    {
+      "name": "Performance Testing",
+      "category": "QA & Testing",
+      "aliases": ["load testing", "JMeter", "stress testing"]
+    },
+    {
+      "name": "BDD/TDD",
+      "category": "QA & Testing",
+      "aliases": ["BDD", "TDD", "Cucumber", "SpecFlow", "behaviour driven", "test driven development"]
+    },
+    {
+      "name": "Appium",
+      "category": "QA & Testing",
+      "aliases": ["mobile test automation"]
+    },
+    {
+      "name": "Defect Tracking",
+      "category": "QA & Testing",
+      "aliases": ["bug tracking", "defect logging", "defect management"]
+    },
+
+    {
+      "name": "Service Desk/Help Desk",
+      "category": "Support & Infrastructure",
+      "aliases": ["service desk", "help desk", "helpdesk", "first line support", "1st line support", "second line support", "2nd line support", "desktop support", "end user support"]
+    },
+    {
+      "name": "ITIL",
+      "category": "Support & Infrastructure",
+      "aliases": ["ITIL v4", "incident management", "problem management", "change management", "service management"]
+    },
+    {
+      "name": "Ticketing Systems",
+      "category": "Support & Infrastructure",
+      "aliases": ["ServiceNow", "Freshdesk", "Zendesk", "Manage Engine", "ticket management", "SLA management"]
+    },
+    {
+      "name": "Windows Server",
+      "category": "Support & Infrastructure",
+      "aliases": ["Windows Server 2019", "Windows Server 2022", "Windows 10", "Windows 11"]
+    },
+    {
+      "name": "Active Directory",
+      "category": "Support & Infrastructure",
+      "aliases": ["Group Policy", "Azure AD", "Entra ID"]
+    },
+    {
+      "name": "Microsoft 365",
+      "category": "Support & Infrastructure",
+      "aliases": ["Office 365", "O365", "M365", "Exchange Online", "Outlook support"]
+    },
+    {
+      "name": "Networking",
+      "category": "Support & Infrastructure",
+      "aliases": ["TCP/IP", "DNS", "DHCP", "LAN", "WAN", "VPN", "routers and switches", "network troubleshooting", "CCNA"]
+    },
+    {
+      "name": "Hardware Support",
+      "category": "Support & Infrastructure",
+      "aliases": ["hardware troubleshooting", "printer support", "laptop imaging", "device setup", "A+ certification"]
+    },
+    {
+      "name": "Remote Support Tools",
+      "category": "Support & Infrastructure",
+      "aliases": ["remote desktop", "RDP", "TeamViewer", "AnyDesk", "remote assistance"]
+    },
+    {
+      "name": "Customer Service",
+      "category": "Support & Infrastructure",
+      "aliases": ["customer support", "customer success", "client liaison", "customer facing"]
+    },
+    {
+      "name": "Virtualisation",
+      "category": "Support & Infrastructure",
+      "aliases": ["VMware", "Hyper-V", "virtual machines", "vSphere"]
+    },
+    {
+      "name": "Backup & Recovery",
+      "category": "Support & Infrastructure",
+      "aliases": ["disaster recovery", "backup management", "Veeam"]
+    },
+
+    {
+      "name": "Business Analysis",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["business analyst", "requirements gathering", "requirements elicitation", "functional specifications", "gap analysis", "solutions analysis"]
+    },
+    {
+      "name": "Power BI",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["PowerBI", "Power B.I.", "DAX", "Power Query"]
+    },
+    {
+      "name": "Power Apps",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["PowerApps", "Canvas Apps", "Model-driven apps"]
+    },
+    {
+      "name": "Power Automate",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["Power Automate Flow", "Microsoft Flow"]
+    },
+    {
+      "name": "Power Platform",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["Microsoft Power Platform", "Dataverse"]
+    },
+    {
+      "name": "Dynamics 365",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["D365", "Dynamics CRM", "Microsoft Dynamics"]
+    },
+    {
+      "name": "SharePoint",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["SharePoint Online", "Share Point"]
+    },
+    {
+      "name": "Process Mapping",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["BPMN", "process modelling", "process modeling", "Visio", "workflow design", "as-is to-be"]
+    },
+    {
+      "name": "UML",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["use case diagrams", "sequence diagrams"]
+    },
+    {
+      "name": "User Stories",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["acceptance criteria", "backlog grooming", "product backlog"]
+    },
+    {
+      "name": "Stakeholder Management",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["stakeholder engagement", "business partnering"]
+    },
+    {
+      "name": "Excel (Advanced)",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["Advanced Excel", "pivot tables", "VLOOKUP", "Excel macros"]
+    },
+
+    {
+      "name": "Cybersecurity",
+      "category": "Security",
+      "aliases": ["cyber security", "information security", "InfoSec", "security operations"]
+    },
+    {
+      "name": "SOC Operations",
+      "category": "Security",
+      "aliases": ["SOC analyst", "security operations centre", "security operations center", "threat monitoring", "threat hunting"]
+    },
+    {
+      "name": "SIEM",
+      "category": "Security",
+      "aliases": ["Splunk", "Microsoft Sentinel", "Azure Sentinel", "QRadar", "log analysis"]
+    },
+    {
+      "name": "Incident Response",
+      "category": "Security",
+      "aliases": ["security incident response", "incident triage", "breach response"]
+    },
+    {
+      "name": "Vulnerability Management",
+      "category": "Security",
+      "aliases": ["vulnerability scanning", "Nessus", "patch management", "vulnerability assessment"]
+    },
+    {
+      "name": "Penetration Testing",
+      "category": "Security",
+      "aliases": ["pen testing", "pentesting", "ethical hacking", "Kali Linux", "Burp Suite"]
+    },
+    {
+      "name": "Firewalls",
+      "category": "Security",
+      "aliases": ["Fortinet", "Palo Alto", "Sophos", "firewall management", "network security"]
+    },
+    {
+      "name": "Identity & Access Management",
+      "category": "Security",
+      "aliases": ["IAM", "access control", "MFA", "single sign-on", "SSO", "OAuth", "JWT"]
+    },
+    {
+      "name": "Security Compliance",
+      "category": "Security",
+      "aliases": ["ISO 27001", "POPIA", "GDPR", "PCI DSS", "security auditing", "risk assessment"]
+    },
+    {
+      "name": "Encryption",
+      "category": "Security",
+      "aliases": ["cryptography", "TLS", "SSL certificates", "PKI"]
+    },
+
+    {
+      "name": "Data Analysis",
+      "category": "Data",
+      "aliases": ["data analytics", "data analyst", "reporting and analysis", "Tableau"]
+    },
+    {
+      "name": "ETL & Data Pipelines",
+      "category": "Data",
+      "aliases": ["ETL", "ELT", "data pipeline", "data pipelines", "SSIS", "data warehousing", "data warehouse", "Databricks"]
+    },
+    {
+      "name": "Pandas/NumPy",
+      "category": "Data",
+      "aliases": ["Pandas", "NumPy", "data wrangling"]
+    },
+    {
+      "name": "Machine Learning",
+      "category": "Data",
+      "aliases": ["ML models", "TensorFlow", "PyTorch", "scikit-learn", "deep learning", "data science"]
+    },
+    {
+      "name": "AI/LLM Integration",
+      "category": "Data",
+      "aliases": ["LLM", "LLMs", "prompt engineering", "OpenAI API", "Claude API", "generative AI", "GenAI", "RAG", "AI product"]
+    },
+    {
+      "name": "Database Design",
+      "category": "Data",
+      "aliases": ["data modelling", "data modeling", "schema design", "normalisation", "ERD", "stored procedures", "query optimisation", "query optimization"]
+    },
+
+    {
+      "name": "Problem Solving",
+      "category": "Ways of Working",
+      "aliases": ["analytical thinking", "problem-solving skills"]
+    },
+    {
+      "name": "Communication",
+      "category": "Ways of Working",
+      "aliases": ["written communication", "verbal communication", "communication skills"]
+    },
+    {
+      "name": "Documentation",
+      "category": "Ways of Working",
+      "aliases": ["technical documentation", "knowledge base articles", "runbooks"]
+    },
+    {
+      "name": "Code Review",
+      "category": "Ways of Working",
+      "aliases": ["peer review", "pull requests", "merge requests"]
+    },
+    {
+      "name": "Salesforce",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["Salesforce CRM", "Apex"]
+    },
+    {
+      "name": "SAP",
+      "category": "Business Analysis & Low-code",
+      "aliases": ["SAP ABAP", "SAP ERP", "S/4HANA"]
+    }
+  ]
+}
