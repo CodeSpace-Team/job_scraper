@@ -57,8 +57,16 @@ def main() -> None:
                         help='Skip AI enrichment (faster but less useful)')
     parser.add_argument('--linkedin-results', type=int, default=200,
                         help='LinkedIn results per term (default: 200, max 300)')
-    parser.add_argument('--indeed-results', type=int, default=100,
-                        help='Indeed results per term (default: 100)')
+    # 50, not 100. F7 took a normal day from 6 search terms to 32, and the
+    # 15 August run enriched 987 jobs at 100 results/term -- about $0.99
+    # against CodeSpace's $1/day cap on its own Anthropic key, real money
+    # with essentially no room for a heavier day. Halving this buys margin
+    # without touching which terms run; it will fall hardest on the terms
+    # that were already returning close to the cap, which on that run were
+    # the original software-development ones -- exactly the tracks F9's
+    # dedupe was already finding the most overlap in.
+    parser.add_argument('--indeed-results', type=int, default=50,
+                        help='Indeed results per term (default: 50)')
     args = parser.parse_args()
 
     start_time = time.time()
