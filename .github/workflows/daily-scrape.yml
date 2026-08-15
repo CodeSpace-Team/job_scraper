@@ -106,14 +106,14 @@ jobs:
         if: always()
         working-directory: .
         run: |
-          if [ ! -f frontend/jobs.json ]; then
-            echo "No frontend/jobs.json produced this run -- nothing to publish."
-            exit 0
-          fi
+          if [ ! -f frontend/public/jobs.json ]; then
+           echo "No frontend/public/jobs.json produced this run -- nothing to publish."
+             exit 0
+           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add frontend/jobs.json
+           git config user.name "github-actions[bot]"
+           git config user.email "github-actions[bot]@users.noreply.github.com"
+           git add frontend/public/jobs.json
 
           if git diff --cached --quiet; then
             echo "frontend/jobs.json is unchanged -- nothing to commit."

@@ -41,8 +41,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from src.pipeline.dedupe import duplicate_key, is_comparable
 from src.utils import log
 
-JOBS_FILE = Path(__file__).resolve().parents[3] / "frontend" / "jobs.json"
-"""Where the board reads from -- committed by CI, not the working repo."""
+JOBS_FILE = Path(__file__).resolve().parents[3] / "frontend" / "public" / "jobs.json"
+"""
+ Where the board reads from -- committed by CI, not the working repo.
+ Inside frontend/public/, not frontend/ itself: that is the one directory
+ Vite copies into the deployed build untouched, so anything outside it never
+ reaches the live site at all.
+ """
 
 RETENTION_DAYS = 45
 """
