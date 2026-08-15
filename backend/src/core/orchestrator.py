@@ -8,6 +8,7 @@ Runs the complete pipeline:
   4. Work out each job's level and years of experience (F2, F3)
   5. Screen out non-tech and above-cohort jobs, with reasons (F1, F4)
   6. Write to Google Sheets
+  7. Publish the board's jobs.json (F6)
 
 Designed for GitHub Actions daily runs.
 
@@ -22,9 +23,7 @@ import sys
 import time
 from datetime import datetime
 
-from src.pipeline import dedupe, experience, levels, roles, screening
-from src.scrapers import indeed, linkedin
-from src.scrapers import offerzen
+from src.scrapers import offerzen, indeed, linkedin
 
 # PNet is optional - handle gracefully
 try:
@@ -35,7 +34,7 @@ except ImportError:
     HAS_PNET = False
 
 from src.enrichment import enhancer
-from src.pipeline import skills
+from src.pipeline import dedupe, experience, levels, publish, roles, screening, skills
 from src.writers import sheets
 from src.utils import log, save_jobs
 
@@ -172,7 +171,6 @@ def main() -> None:
     all_jobs = skills.apply_keyword_skills(all_jobs)
     skills.log_fill_rate(all_jobs)
 
-
     # ── PHASE 2: ENRICHMENT ──────────────────────────────────────────────────
 
     if not args.skip_enrichment:
@@ -291,6 +289,22 @@ def main() -> None:
             log(f"⚠ Could not write the Exclude tab: {e}")
             log("  The Jobs sheet is fine. The dropped jobs are still saved in")
             log("  data/cache/excluded_jobs.json.")
+
+    # ── PHASE 3.7: PUBLISH THE BOARD (F6) ────────────────────────────────────
+    # Independent of the Sheets write above -- frontend/jobs.json is its own
+    # running file, not a copy of the Sheet, so it has nothing to wait on and
+    # nothing to lose if Sheets is down. A failure here warns rather than
+    # exits, same reasoning as the Exclude tab: the run has already done its
+    # real work by this point.
+
+    log("\n[PHASE 3.7] PUBLISHING THE BOARD...")
+
+    try:
+        publish_counts = publish.publish(all_jobs)
+        publish.log_publish(publish_counts)
+    except Exception as e:
+        log(f"⚠ Could not publish the board: {e}")
+        log("  The Jobs sheet is fine. frontend/jobs.json was not updated this run.")
 
     # ── SUMMARY ──────────────────────────────────────────────────────────────
 

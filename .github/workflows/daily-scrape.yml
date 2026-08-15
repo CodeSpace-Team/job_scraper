@@ -21,6 +21,8 @@ jobs:
   scrape-and-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: backend
@@ -92,7 +94,34 @@ jobs:
           path: |
             backend/data/cache/*.json
           retention-days: 7
-      
+
+      # ─── Publish the board (F6) ─────────────────────────────────────────
+      # frontend/jobs.json is written by the pipeline regardless of whether
+      # the Sheets write succeeded (see PHASE 3.7 in orchestrator.py), so
+      # this runs even if an earlier step failed -- as long as the file
+      # exists, the run produced something worth publishing. Committing it
+      # here, rather than as part of the pipeline itself, keeps Python out
+      # of the business of pushing to git.
+      - name: Commit and push jobs.json to the board
+        if: always()
+        working-directory: .
+        run: |
+          if [ ! -f frontend/jobs.json ]; then
+            echo "No frontend/jobs.json produced this run -- nothing to publish."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add frontend/jobs.json
+
+          if git diff --cached --quiet; then
+            echo "frontend/jobs.json is unchanged -- nothing to commit."
+          else
+            git commit -m "chore: publish today's jobs.json [skip ci]"
+            git push
+          fi
+
       - name: Notify on failure
         if: failure()
         run: |
