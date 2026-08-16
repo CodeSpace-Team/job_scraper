@@ -13,13 +13,20 @@ export default function App() {
   const visible = useMemo(() => filterJobs(jobs, filters), [jobs, filters])
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-6xl px-4 py-6">
-          <h1 className="text-xl font-bold text-slate-900">CodeSpace Job Board</h1>
-          <p className="text-sm text-slate-600">
-            Tech jobs in South Africa for graduates in their first three years of work.
-          </p>
+    <div className="min-h-screen bg-white">
+      <header className="border-b border-neutral-800 bg-codespace-ink">
+        <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-6">
+          <img
+            src="https://codespace-assets.global.ssl.fastly.net/wp/assets/website/codespace-primary-logo-light.svg"
+            alt="CodeSpace"
+            className="h-8 w-auto"
+          />
+          <div>
+            <h1 className="text-xl font-bold text-codespace-teal">Job Board</h1>
+            <p className="text-sm text-neutral-300">
+              Tech jobs in South Africa for graduates in their first three years of work.
+            </p>
+          </div>
         </div>
       </header>
 
@@ -42,10 +49,10 @@ export default function App() {
 
           <div className="flex-1">
             {loading ? (
-              <p className="text-sm text-slate-600">Loading jobs...</p>
+              <p className="text-sm text-neutral-600">Loading jobs...</p>
             ) : (
               <>
-                <p className="mb-3 text-sm text-slate-600">
+                <p className="mb-3 text-sm text-neutral-600">
                   {visible.length} of {jobs.length} jobs
                 </p>
                 <div className="space-y-3">
@@ -54,7 +61,7 @@ export default function App() {
                   ))}
                 </div>
                 {visible.length === 0 && jobs.length > 0 && (
-                  <p className="text-sm text-slate-600">
+                  <p className="text-sm text-neutral-600">
                     No jobs match these filters. Try clearing a few.
                   </p>
                 )}
