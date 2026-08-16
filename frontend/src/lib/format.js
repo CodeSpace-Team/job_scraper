@@ -42,3 +42,38 @@ export function formatLevel(level) {
   if (!level || level === 'unknown') return null
   return level.charAt(0).toUpperCase() + level.slice(1)
 }
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * Formats a "YYYY-MM-DD" date string as "14 Aug 2026".
+ *
+ * Deliberately not Date/Intl-based -- toLocaleDateString() has the exact
+ * same runtime-locale problem toLocaleString() had for salary, and the
+ * Date constructor has its own timezone traps parsing a bare date string.
+ * Plain string slicing is the only way to guarantee the same output on
+ * every machine.
+ */
+export function formatDate(dateStr) {
+  if (!dateStr) return null
+  const match = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return null
+  const [, year, month, day] = match
+  const monthName = MONTHS[Number(month) - 1]
+  if (!monthName) return null
+  return `${Number(day)} ${monthName} ${year}`
+}
+
+/**
+ * The date to show on a job card: the ad's own posting date when it
+ * states one, falling back to the date the board first added the job --
+ * only a date, never a time, since the pipeline runs once a day and every
+ * job from the same run would show an identical, meaningless time.
+ */
+export function formatJobDate(job) {
+  const posted = formatDate(job.date_posted)
+  if (posted) return `Posted ${posted}`
+  const added = formatDate(job.date_added)
+  if (added) return `Added ${added}`
+  return null
+}
