@@ -19,6 +19,7 @@ const SAMPLE_JOBS = [
     job_level: 'entry',
     must_have_skills: 'JavaScript, React',
     job_url: 'https://example.com/1',
+    date_posted: '2026-08-01',
   },
   {
     title: 'IT Support Technician',
@@ -27,6 +28,7 @@ const SAMPLE_JOBS = [
     job_level: 'entry',
     must_have_skills: 'Windows, Networking',
     job_url: 'https://example.com/2',
+    date_posted: '2026-08-14',
   },
 ]
 
@@ -83,5 +85,33 @@ describe('App', () => {
     await waitFor(() =>
       expect(screen.getByText(/No jobs match these filters/)).toBeInTheDocument(),
     )
+  })
+
+  it('defaults to newest first, and re-orders when the sort is changed', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
+
+    const titlesInOrder = () =>
+      screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+
+    expect(titlesInOrder()).toEqual(['IT Support Technician', 'Junior React Developer'])
+
+    await user.selectOptions(screen.getByLabelText('Sort jobs'), 'oldest')
+
+    expect(titlesInOrder()).toEqual(['Junior React Developer', 'IT Support Technician'])
+  })
+
+  it('the filter panel\'s "clear all filters" button resets search and shows every job again', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
+
+    await user.type(screen.getByLabelText('Search jobs'), 'no such job anywhere')
+    await waitFor(() => expect(screen.getByText('Clear all filters')).toBeInTheDocument())
+
+    await user.click(screen.getByText('Clear all filters'))
+
+    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
   })
 })

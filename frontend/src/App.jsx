@@ -4,13 +4,16 @@ import JobCard from './components/JobCard.jsx'
 import SearchBar from './components/SearchBar.jsx'
 import { useJobs } from './hooks/useJobs.js'
 import { EMPTY_FILTERS, extractFacets, filterJobs } from './lib/filters.js'
+import { DEFAULT_SORT, SORT_OPTIONS, sortJobs } from './lib/sort.js'
 
 export default function App() {
   const { jobs, loading, error } = useJobs()
   const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [sortBy, setSortBy] = useState(DEFAULT_SORT)
 
   const facets = useMemo(() => extractFacets(jobs), [jobs])
-  const visible = useMemo(() => filterJobs(jobs, filters), [jobs, filters])
+  const filtered = useMemo(() => filterJobs(jobs, filters), [jobs, filters])
+  const visible = useMemo(() => sortJobs(filtered, sortBy), [filtered, sortBy])
 
   return (
     <div className="min-h-screen bg-white">
@@ -37,11 +40,25 @@ export default function App() {
           </div>
         )}
 
-        <div className="mb-4">
-          <SearchBar
-            value={filters.search}
-            onChange={(search) => setFilters({ ...filters, search })}
-          />
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+          <div className="flex-1">
+            <SearchBar
+              value={filters.search}
+              onChange={(search) => setFilters({ ...filters, search })}
+            />
+          </div>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            aria-label="Sort jobs"
+            className="rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-codespace-teal focus:outline-none focus:ring-1 focus:ring-codespace-teal"
+          >
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex flex-col gap-6 md:flex-row">
@@ -49,7 +66,13 @@ export default function App() {
 
           <div className="flex-1">
             {loading ? (
-              <p className="text-sm text-neutral-600">Loading jobs...</p>
+              <div className="flex items-center gap-2 text-sm text-neutral-600">
+                <span
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-300 border-t-codespace-teal"
+                  aria-hidden="true"
+                />
+                Loading jobs...
+              </div>
             ) : (
               <>
                 <p className="mb-3 text-sm text-neutral-600">
@@ -61,9 +84,11 @@ export default function App() {
                   ))}
                 </div>
                 {visible.length === 0 && jobs.length > 0 && (
-                  <p className="text-sm text-neutral-600">
-                    No jobs match these filters. Try clearing a few.
-                  </p>
+                  <div className="rounded-lg border border-neutral-200 bg-white p-6 text-center">
+                    <p className="text-sm text-neutral-600">
+                      No jobs match these filters. Try clearing some from the panel on the left.
+                    </p>
+                  </div>
                 )}
               </>
             )}

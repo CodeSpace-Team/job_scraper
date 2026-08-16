@@ -93,6 +93,23 @@ export function matchesMaxYears(job, maxYears) {
   return parsed <= Number(maxYears)
 }
 
+/**
+ * True when at least one filter is actively narrowing the list -- used to
+ * decide whether a "clear all filters" control has anything to do.
+ */
+export function hasActiveFilters(filters) {
+  return (
+    Boolean(filters.search) ||
+    filters.roleTypes.length > 0 ||
+    filters.levels.length > 0 ||
+    filters.skills.length > 0 ||
+    filters.workPolicies.length > 0 ||
+    filters.sources.length > 0 ||
+    filters.employmentTypes.length > 0 ||
+    Boolean(filters.maxYears)
+  )
+}
+
 export function filterJobs(jobs, filters = EMPTY_FILTERS) {
   return jobs.filter(
     (job) =>

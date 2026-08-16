@@ -17,6 +17,7 @@ import {
   EMPTY_FILTERS,
   extractFacets,
   filterJobs,
+  hasActiveFilters,
   jobSkills,
   matchesMaxYears,
   matchesSearch,
@@ -158,6 +159,27 @@ describe('filterJobs', () => {
     const jobs = [makeJob({ job_level: '' })]
     expect(filterJobs(jobs, { ...EMPTY_FILTERS, levels: ['unknown'] })).toHaveLength(1)
     expect(filterJobs(jobs, { ...EMPTY_FILTERS, levels: ['entry'] })).toHaveLength(0)
+  })
+})
+
+// ─── hasActiveFilters ───────────────────────────────────────────────────
+
+describe('hasActiveFilters', () => {
+  it('is false for the empty filters', () => {
+    expect(hasActiveFilters(EMPTY_FILTERS)).toBe(false)
+  })
+
+  it('is true when search text is set', () => {
+    expect(hasActiveFilters({ ...EMPTY_FILTERS, search: 'react' })).toBe(true)
+  })
+
+  it('is true when any checkbox category has a selection', () => {
+    expect(hasActiveFilters({ ...EMPTY_FILTERS, roleTypes: ['Software Development'] })).toBe(true)
+    expect(hasActiveFilters({ ...EMPTY_FILTERS, skills: ['Python'] })).toBe(true)
+  })
+
+  it('is true when a max-years cap is set', () => {
+    expect(hasActiveFilters({ ...EMPTY_FILTERS, maxYears: '3' })).toBe(true)
   })
 })
 
