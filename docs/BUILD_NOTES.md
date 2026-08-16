@@ -448,7 +448,7 @@ Caught before shipping, while writing the tests for it rather than on a live run
 
 ## F6 — The job board
 
-**Done:** 15 August 2026
+**Done:** 15 August 2026 (verified against a live run and restyled to CodeSpace's branding, 16 August 2026)
 
 ### The problem
 
@@ -460,7 +460,9 @@ Two halves.
 
 **The data half.** A new module, `publish.py`, keeps `frontend/public/jobs.json` as its own running list — separate from the Sheet's history, which still carries thousands of rows scraped before F1 and F4 existed and were never screened for tech relevance or seniority. Each day's run merges in today's screened, deduplicated, leveled jobs, matching against what is already on the board with the same title/company/city key F9 already uses, so a job scraped again the next day replaces its old row instead of duplicating. Anything whose posting has aged past 45 days drops off on its own.
 
-**The board itself.** A Vite + React + Tailwind CSS single-page app in `frontend/`, fetching `jobs.json` and rendering it as a searchable, filterable list — checkboxes for role type, level, work policy, skills and source, a cap on years of experience asked for, and free text search across title, company, blurb and description. Selecting several values inside one filter is OR ("React or Python"); different filters combine with AND ("Software track AND entry level AND (React or Python)").
+**The board itself.** A Vite + React + Tailwind CSS single-page app in `frontend/`, fetching `jobs.json` and rendering it as a searchable, filterable list — checkboxes for role type, level, work policy, skills and source, a cap on years of experience asked for, and free text search across title, company, blurb and description. Selecting several values inside one filter is OR ("React or Python"); different filters combine with AND ("Software track AND entry level AND (React or Python)"). Each card also shows the ad's own posting date, or the date the board first added it when the ad states none.
+
+**CodeSpace's own branding.** The board's colours and logo were pulled from codespace.co.za rather than left as a generic default palette — a muted teal, a warm near-black header carrying the real CodeSpace logo, and a pale mint used for skill chips, echoing the highlighted-phrase style on their own site.
 
 The daily GitHub Action now commits `frontend/public/jobs.json` after every run — independent of whether the Sheets write succeeds — so Netlify redeploys the board automatically.
 
@@ -472,7 +474,9 @@ The daily GitHub Action now commits `frontend/public/jobs.json` after every run 
 
 **The retention window keeps the board honest.** Job ads do not stay open forever. Without a cutoff, the board would just become a second, slower-growing copy of the Sheet's own history. 45 days is the working number for now.
 
-**Salary is shown, not filtered on.** Checked the real job data before deciding, the same way F2/F3 checked real years-of-experience data before trusting it: OfferZen and PNet never populate `salary_min`/`salary_max` at all, and only Indeed sometimes does, when the ad states it. Not enough real fill-rate to justify a filter people would expect to actually narrow their search.
+**The job date shows a date, never a time.** The pipeline runs once a day, so every job added in the same run would show an identical, meaningless time if one were invented. A plain date — the ad's own posting date, or the day the board first saw the job — is the honest amount of precision the data actually supports.
+
+**Salary is shown, not filtered on.** Checked the real job data before deciding, the same way F2/F3 checked real years-of-experience data before trusting it: OfferZen and PNet never populate `salary_min`/`salary_max` at all, and only Indeed sometimes does, when the ad states it. Not enough real fill-rate to justify a filter people would expect to actually narrow their search — still true after the first live run, see Still Open.
 
 ### What we chose not to do
 
@@ -480,28 +484,32 @@ The daily GitHub Action now commits `frontend/public/jobs.json` after every run 
 
 **We did not stand up a backend or API for the board.** `jobs.json` is a static file, fetched once on page load. That is what "publish jobs.json" in the brief actually asks for, and it is free to host.
 
-### One thing that needed care — twice
+### What the first live run showed
+
+The first real run reached the board with 182 jobs, out of 653 scraped and screened — F1, F2/F3 and F4 all behaving as designed on live data (matching the numbers those features were built against: no level ever decided by the AI, years of experience filled at 40%, exactly on the target F2/F3 set).
+
+One real problem surfaced only once the board was live: the six sample jobs seeded into `frontend/public/jobs.json` for local development were still showing on the deployed site, mixed in with real listings, after the first live run. `publish()` merges rather than replaces — a new job only overwrites an existing one when its title/company/city key matches, and the fake sample companies never matched anything real, so they just sat there, well within the 45-day retention window. Fixed with a one-off cleanup script to strip the seeded entries out of the committed file; every merge from that point on only ever builds on real data.
+
+### One thing that needed care — three times
 
 **The `public/` convention.** The first version of `publish.py` wrote to `frontend/jobs.json`. Vite and Netlify only deploy files sitting inside `frontend/public/` — anything outside it never reaches the live site at all. Caught before any frontend code was written, by doing a real production build and confirming `jobs.json` actually landed in `dist/`, not by assumption.
 
-**A locale bug in the salary formatter.** `Number.toLocaleString()` with no explicit locale formats thousands separators according to whatever locale the machine running it resolves — a comma on one machine, a space on another. The tests passed in the environment that built the feature and failed on the machine that actually runs the project, which is exactly the kind of thing a second machine catches that the first one cannot. Fixed by pinning the locale explicitly (`'en-US'`) so the output is the same everywhere, matching the comma the backend's own `format_salary()` always writes to the Sheet.
+**A locale bug in the salary formatter.** `Number.toLocaleString()` with no explicit locale formats thousands separators according to whatever locale the machine running it resolves — a comma on one machine, a space on another. The tests passed in the environment that built the feature and failed on the machine that actually runs the project, which is exactly the kind of thing a second machine catches that the first one cannot. Fixed by pinning the locale explicitly (`'en-US'`), and the same fix was applied up front to the date formatter added afterward rather than waiting to be caught twice.
+
+**Seeded sample data outliving its purpose.** Covered above — the fix was a one-off cleanup, not a code change, since `publish()` itself was behaving exactly as designed.
 
 ### How to check it is working
 
 - **In the run log**, `[PHASE 3.7]` prints the board's publish summary: how many jobs were carried over, how many came in today, how many aged out, and the final total.
 - **Backend tests**: `pytest -q` from `backend/` — 24 tests on `publish.py`, 100% coverage.
-- **Frontend tests**: `npm test` from `frontend/` — 36 tests across the filter/search logic, the display formatters, and the page itself.
-- **Visually**: once Netlify is connected, open the live URL and check search and the filter panel actually narrow the list.
+- **Frontend tests**: `npm test` from `frontend/` — 43 tests across the filter/search logic, the display formatters, and the page itself.
+- **Visually**: the live Netlify URL — search and the filter panel should narrow the list, and every card should show a plain posting or added date.
 
 ### Still open
 
-**The Netlify site is not connected yet.** `netlify.toml` sits at the repo root with the build settings already in it, so linking the repo should be all that is needed — no manual base directory/build command/publish directory configuration.
+**The salary filter is still deferred.** The first live run did not change the underlying fact — OfferZen and PNet never populate salary, only Indeed sometimes does — so there still isn't enough real fill-rate to justify it. Worth a proper count from a few more days of live runs before deciding either way.
 
-**No live run has gone through Phase 3.7 yet.** The first real `frontend/public/jobs.json` lands on the next scheduled run; today's board is running on a hand-written sample.
-
-**The salary filter is deferred**, pending real fill-rate data from a live run.
-
-**F1, F2/F3 and F4 still need verifying against a live run** — a pre-existing open item, not new to F6, but worth doing once there is a live board to see the result on.
+**Netlify is currently a manual deploy, not the GitHub-connected one.** Org access to connect Netlify directly to `CodeSpace-Team/job_scraper` is pending from Emma; until then, the board is kept current with a manual `git pull` → `npm run build` → drag `dist/` to Netlify each morning, rather than deploying automatically on every push.
 
 ### Files
 
@@ -512,9 +520,9 @@ The daily GitHub Action now commits `frontend/public/jobs.json` after every run 
 | `backend/src/core/orchestrator.py` | Runs publishing as Phase 3.7 |
 | `.github/workflows/daily-scrape.yml` | Commits and pushes `jobs.json` after each run |
 | `netlify.toml` | Netlify build config, at the repo root |
+| `frontend/tailwind.config.js` | CodeSpace's brand colours as named Tailwind tokens |
 | `frontend/src/lib/filters.js` | The board's search and filter rules, and its facet extraction |
-| `frontend/src/lib/format.js` | Salary, years and level display formatting |
+| `frontend/src/lib/format.js` | Salary, years, level and date display formatting |
 | `frontend/src/App.jsx`, `frontend/src/components/`, `frontend/src/hooks/useJobs.js` | The page itself — search bar, filter panel, job cards, data fetching |
 
 ---
-
