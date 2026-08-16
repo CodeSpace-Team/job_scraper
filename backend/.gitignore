@@ -1,0 +1,57 @@
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment variables
+.env
+.env.local
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Job scraper data files (don't commit scraped data)
+*_jobs.json
+*_jobs_enriched.json
+combined_jobs*.json
+*.csv
+
+# Service account credentials (NEVER commit these!)
+*service-account*.json
+*credentials*.json
+*.pem
+
+# Logs
+*.log
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Test artefacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# Scraped data. The QA review sheets under data/qa/ are deliberately NOT
+# ignored -- they are the written record of the weekly level check.
+data/cache/
