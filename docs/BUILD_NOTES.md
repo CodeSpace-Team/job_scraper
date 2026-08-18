@@ -448,7 +448,7 @@ Caught before shipping, while writing the tests for it rather than on a live run
 
 ## F6 — The job board
 
-**Done:** 15 August 2026 (verified against a live run and restyled to CodeSpace's branding, 16 August 2026)
+**Done:** 15 August 2026 (verified against a live run, restyled to CodeSpace's branding, and polished with sorting/search, 16 August 2026)
 
 ### The problem
 
@@ -460,9 +460,11 @@ Two halves.
 
 **The data half.** A new module, `publish.py`, keeps `frontend/public/jobs.json` as its own running list — separate from the Sheet's history, which still carries thousands of rows scraped before F1 and F4 existed and were never screened for tech relevance or seniority. Each day's run merges in today's screened, deduplicated, leveled jobs, matching against what is already on the board with the same title/company/city key F9 already uses, so a job scraped again the next day replaces its old row instead of duplicating. Anything whose posting has aged past 45 days drops off on its own.
 
-**The board itself.** A Vite + React + Tailwind CSS single-page app in `frontend/`, fetching `jobs.json` and rendering it as a searchable, filterable list — checkboxes for role type, level, work policy, skills and source, a cap on years of experience asked for, and free text search across title, company, blurb and description. Selecting several values inside one filter is OR ("React or Python"); different filters combine with AND ("Software track AND entry level AND (React or Python)"). Each card also shows the ad's own posting date, or the date the board first added it when the ad states none.
+**The board itself.** A Vite + React + Tailwind CSS single-page app in `frontend/`, fetching `jobs.json` and rendering it as a searchable, filterable, sortable list — checkboxes for role type, level, work policy, skills and source, a cap on years of experience asked for, and free text search across title, company, blurb and description. Selecting several values inside one filter is OR ("React or Python"); different filters combine with AND ("Software track AND entry level AND (React or Python)"). Each card also shows the ad's own posting date, or the date the board first added it when the ad states none.
 
 **CodeSpace's own branding.** The board's colours and logo were pulled from codespace.co.za rather than left as a generic default palette — a muted teal, a warm near-black header carrying the real CodeSpace logo, and a pale mint used for skill chips, echoing the highlighted-phrase style on their own site.
+
+**Sorting, a searchable skills list, and a working "clear all filters" button.** Sort by newest, oldest, or fewest years required — kept in its own `lib/sort.js`, since ordering and filtering are different questions worth testing apart. The skills checkbox list, which can run well past the 20 shown by default on a real day, now has a small search box to find one by typing instead of scrolling. And there is finally a way to recover from a filter combination that returns nothing: a single "clear all filters" control, driven by a new `hasActiveFilters()` check.
 
 The daily GitHub Action now commits `frontend/public/jobs.json` after every run — independent of whether the Sheets write succeeds — so Netlify redeploys the board automatically.
 
@@ -476,7 +478,9 @@ The daily GitHub Action now commits `frontend/public/jobs.json` after every run 
 
 **The job date shows a date, never a time.** The pipeline runs once a day, so every job added in the same run would show an identical, meaningless time if one were invented. A plain date — the ad's own posting date, or the day the board first saw the job — is the honest amount of precision the data actually supports.
 
-**Salary is shown, not filtered on.** Checked the real job data before deciding, the same way F2/F3 checked real years-of-experience data before trusting it: OfferZen and PNet never populate `salary_min`/`salary_max` at all, and only Indeed sometimes does, when the ad states it. Not enough real fill-rate to justify a filter people would expect to actually narrow their search — still true after the first live run, see Still Open.
+**Salary is shown, not filtered on.** Checked the real job data before deciding, the same way F2/F3 checked real years-of-experience data before trusting it: OfferZen and PNet never populate `salary_min`/`salary_max` at all, and only Indeed sometimes does, when the ad states it. The first live run made this a certainty rather than a guess — zero of the 653 jobs scraped that day had a salary figure at all. Not a close call; there is nothing to filter on yet.
+
+**Sort options are the ones a graduate would actually use.** Newest and oldest are the obvious pair, and "fewest years required first" surfaces the jobs someone with the least experience can most easily qualify for — a more useful third option than, say, alphabetical by company.
 
 ### What we chose not to do
 
@@ -490,7 +494,7 @@ The first real run reached the board with 182 jobs, out of 653 scraped and scree
 
 One real problem surfaced only once the board was live: the six sample jobs seeded into `frontend/public/jobs.json` for local development were still showing on the deployed site, mixed in with real listings, after the first live run. `publish()` merges rather than replaces — a new job only overwrites an existing one when its title/company/city key matches, and the fake sample companies never matched anything real, so they just sat there, well within the 45-day retention window. Fixed with a one-off cleanup script to strip the seeded entries out of the committed file; every merge from that point on only ever builds on real data.
 
-### One thing that needed care — three times
+### One thing that needed care — four times
 
 **The `public/` convention.** The first version of `publish.py` wrote to `frontend/jobs.json`. Vite and Netlify only deploy files sitting inside `frontend/public/` — anything outside it never reaches the live site at all. Caught before any frontend code was written, by doing a real production build and confirming `jobs.json` actually landed in `dist/`, not by assumption.
 
@@ -498,16 +502,18 @@ One real problem surfaced only once the board was live: the six sample jobs seed
 
 **Seeded sample data outliving its purpose.** Covered above — the fix was a one-off cleanup, not a code change, since `publish()` itself was behaving exactly as designed.
 
+**Two "clear all filters" buttons at once.** The first version of the empty-results state added its own clear-filters button, not realising the filter panel already shows a persistent one whenever a filter is active — so the exact moment meant to demonstrate the fix (a filter combination returning nothing) rendered two identical buttons side by side. Caught by a test asserting on the button's text, which failed with "found multiple elements" the moment both were on screen together. Fixed by removing the duplicate; the empty state now just points at the one button that was already there.
+
 ### How to check it is working
 
 - **In the run log**, `[PHASE 3.7]` prints the board's publish summary: how many jobs were carried over, how many came in today, how many aged out, and the final total.
 - **Backend tests**: `pytest -q` from `backend/` — 24 tests on `publish.py`, 100% coverage.
-- **Frontend tests**: `npm test` from `frontend/` — 43 tests across the filter/search logic, the display formatters, and the page itself.
-- **Visually**: the live Netlify URL — search and the filter panel should narrow the list, and every card should show a plain posting or added date.
+- **Frontend tests**: `npm test` from `frontend/` — 62 tests across the filter/search/sort logic, the display formatters, the filter panel's own interactive behaviour, and the page itself.
+- **Visually**: the live Netlify URL — search, sort, and the filter panel (including the skills search box and clear-filters button) should all behave as expected, and every card should show a plain posting or added date. Checked on both desktop and mobile viewports; the layout stacks cleanly on a phone with no changes needed.
 
 ### Still open
 
-**The salary filter is still deferred.** The first live run did not change the underlying fact — OfferZen and PNet never populate salary, only Indeed sometimes does — so there still isn't enough real fill-rate to justify it. Worth a proper count from a few more days of live runs before deciding either way.
+**The salary filter stays out.** Settled, not deferred — zero fill-rate on the first live run makes this a closed question until the data itself changes, not an open one to revisit soon.
 
 **Netlify is currently a manual deploy, not the GitHub-connected one.** Org access to connect Netlify directly to `CodeSpace-Team/job_scraper` is pending from Emma; until then, the board is kept current with a manual `git pull` → `npm run build` → drag `dist/` to Netlify each morning, rather than deploying automatically on every push.
 
@@ -521,9 +527,11 @@ One real problem surfaced only once the board was live: the six sample jobs seed
 | `.github/workflows/daily-scrape.yml` | Commits and pushes `jobs.json` after each run |
 | `netlify.toml` | Netlify build config, at the repo root |
 | `frontend/tailwind.config.js` | CodeSpace's brand colours as named Tailwind tokens |
-| `frontend/src/lib/filters.js` | The board's search and filter rules, and its facet extraction |
+| `frontend/src/lib/filters.js` | The board's search and filter rules, facet extraction, and `hasActiveFilters()` |
+| `frontend/src/lib/sort.js` | Newest/oldest/fewest-years-required ordering |
 | `frontend/src/lib/format.js` | Salary, years, level and date display formatting |
-| `frontend/src/App.jsx`, `frontend/src/components/`, `frontend/src/hooks/useJobs.js` | The page itself — search bar, filter panel, job cards, data fetching |
+| `frontend/src/components/FilterPanel.jsx` | The filter panel, including the searchable skills list and clear-filters button |
+| `frontend/src/App.jsx`, `frontend/src/components/`, `frontend/src/hooks/useJobs.js` | The rest of the page — search bar, sort control, job cards, data fetching |
 
 ---
 
