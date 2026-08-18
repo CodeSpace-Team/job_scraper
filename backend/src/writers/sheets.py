@@ -67,8 +67,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple, Union
 
 from src.pipeline.dedupe import is_comparable, key_from_row, duplicate_key
-from src.utils import log
-from src.utils import retry
+from src.utils import log, retry
 
 try:
     import gspread
@@ -130,6 +129,17 @@ SHEET_SCOPES: List[str] = [
     'https://spreadsheets.google.com/feeds',
     'https://www.googleapis.com/auth/drive',
 ]
+
+RETRYABLE_API_STATUSES: frozenset = frozenset({429, 500, 502, 503, 504})
+"""
+Google's own failures, as opposed to ours.
+
+A 5xx means Google could not serve a request that was otherwise fine, and a
+429 means it is asking us to slow down; both clear on their own and are worth
+trying again. A 403 (sheet not shared with the service account) or a 404
+(wrong spreadsheet ID) is a real problem at our end that will fail identically
+every time, so those are reported straight away rather than three times over.
+"""
 
 
 # ─── Helper Functions ──────────────────────────────────────────────────────
@@ -283,7 +293,7 @@ def format_exclude_row(
     date_excluded: Optional[str] = None,
 ) -> List[str]:
     """
-        Convert an excluded job into an Exclude tab row.
+    Convert an excluded job into an Exclude tab row.
 
     Args:
         job: Job dictionary carrying 'excluded_stage' and 'excluded_reason'.
@@ -308,7 +318,6 @@ def format_exclude_row(
         _safe_job_get(job, 'description_snippet')[:500],  # J: Description
         "YES" if job.get('needs_review') else "",          # K: Needs Review
     ]
-    
 
 
 def deduplicate_jobs(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -338,17 +347,88 @@ def deduplicate_jobs(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return unique
 
 
-@retry(exceptions=(ConnectionError, TimeoutError), tries=3, delay=2.0, backoff=2.0)
+# ─── Main Writer ────────────────────────────────────────────────────────────
+
+def _api_error_status(error: BaseException) -> Optional[int]:
+    """
+    Work out the HTTP status behind a gspread APIError.
+
+    gspread reads the status out of the error body Google sends back and
+    exposes it as `.code`, but falls back to -1 when that body is not valid
+    JSON -- which is exactly what a load balancer returning a plain HTML
+    error page during an outage looks like. So the response's own status
+    code is used as the second opinion.
+
+    Args:
+        error: The exception to inspect.
+
+    Returns:
+        The status code, or None if this exception carries no usable one.
+    """
+    code = getattr(error, 'code', None)
+    if isinstance(code, int) and code > 0:
+        return code
+
+    response = getattr(error, 'response', None)
+    status = getattr(response, 'status_code', None)
+    return status if isinstance(status, int) else None
+
+
+def _is_retryable_sheets_error(error: BaseException) -> bool:
+    """
+    Decide whether a failure to open the spreadsheet is worth trying again.
+
+    Args:
+        error: The exception raised by the attempt.
+
+    Returns:
+        True to retry, False to report the failure immediately.
+    """
+    # A dropped or timed-out connection never made it to Google at all.
+    if not isinstance(error, gspread.exceptions.APIError):
+        return True
+
+    status = _api_error_status(error)
+    if status is None:
+        # An API error we cannot read a status out of. Reported as-is rather
+        # than retried, so an unfamiliar failure surfaces plainly instead of
+        # being buried under a minute of quiet retrying.
+        return False
+
+    return status in RETRYABLE_API_STATUSES
+
+
+@retry(
+    exceptions=(ConnectionError, TimeoutError, gspread.exceptions.APIError),
+    tries=4,
+    delay=3.0,
+    backoff=2.0,
+    should_retry=_is_retryable_sheets_error,
+)
 def _open_spreadsheet(client: gspread.Client, spreadsheet_id: str) -> gspread.Spreadsheet:
     """
-    Open a spreadsheet by ID, retrying on a dropped connection.
+    Open a spreadsheet by ID, retrying failures that are Google's rather than ours.
 
-    Google's API resets the connection now and then for no reason tied to
-    anything wrong with the request -- it happened on the run this was
-    added for, with nothing else in the run at fault. Retried, the same
-    call went through immediately. Only a network failure is retried here;
-    a bad spreadsheet ID or missing sharing permission fails the same way
-    it always did, since trying again will not fix either of those.
+    Two different things have ended a run here, on two different days.
+
+    The first was a dropped connection -- "Connection reset by peer", nothing
+    wrong with the request, and the same call went through immediately when
+    retried. The second was `APIError: [503]: The service is currently
+    unavailable`, a Google-side outage lasting less than a second: everything
+    the run had already done was fine, the Exclude tab written moments later
+    went through, and only this one call happened to land inside the outage.
+
+    That second failure was not retried at the time, because it arrives as
+    gspread's own APIError rather than as a network error, and the retry here
+    only covered network errors. Both are covered now -- but only for statuses
+    that mean the problem is at Google's end (see RETRYABLE_API_STATUSES). A
+    wrong spreadsheet ID or a sheet that was never shared with the service
+    account still fails on the first attempt, since no amount of retrying
+    fixes either, and a config mistake should be reported quickly.
+
+    Four attempts three seconds apart, doubling, covers about 21 seconds of
+    outage. That is nothing against an 18-minute run, and long enough for the
+    kind of blip that has actually happened.
 
     Args:
         client: An authenticated gspread client.
@@ -359,7 +439,6 @@ def _open_spreadsheet(client: gspread.Client, spreadsheet_id: str) -> gspread.Sp
     """
     return client.open_by_key(spreadsheet_id)
 
-# ─── Main Writer ────────────────────────────────────────────────────────────
 
 def write_to_sheet(
     jobs: List[Dict[str, Any]],
@@ -374,7 +453,7 @@ def write_to_sheet(
         spreadsheet_id: Google Sheets ID (from URL)
         sheet_name: Name of worksheet (default: "Jobs")
 
-        Returns:
+    Returns:
         URL of the updated spreadsheet
 
     Raises:
@@ -431,7 +510,6 @@ def write_to_sheet(
 
     # ── Check for Migration (old 15-column format) ──
     needs_migration = False
-    # ── Read Existing URLs ──
     existing_urls: Set[str] = set()
     existing_keys: Set[Tuple[str, str, str]] = set()
     existing_data: List[List[str]] = []
@@ -480,7 +558,7 @@ def write_to_sheet(
                     for row in records
                     if row.get('Apply Link')
                 }
-                                # The same key the F9 step uses, rebuilt from the rows already
+                # The same key the F9 step uses, rebuilt from the rows already
                 # in the sheet. This is what catches a re-post: an advert from
                 # weeks ago reappearing under a fresh web address would sail
                 # past the Apply Link check and land as a second row.
@@ -497,6 +575,7 @@ def write_to_sheet(
     except Exception:
         # Empty sheet or error reading
         existing_urls = set()
+        existing_keys = set()
         existing_count = 0
         needs_migration = False
 
@@ -600,7 +679,7 @@ def write_exclude_tab(
         spreadsheet_id: Google Sheets ID (from URL).
         sheet_name: Worksheet name (default: "Exclude").
 
-        Returns:
+    Returns:
         The number of rows actually appended.
 
     Raises:
@@ -648,8 +727,6 @@ def write_exclude_tab(
         worksheet.update([EXCLUDE_HEADERS], value_input_option='USER_ENTERED')  # type: ignore
         log(f"Updated the '{sheet_name}' header row "
             f"({len(current_headers)} -> {len(EXCLUDE_HEADERS)} columns)")
-
-    # ── Read Existing URLs ──
 
     # ── Read Existing URLs ──
     existing_urls: Set[str] = set()
