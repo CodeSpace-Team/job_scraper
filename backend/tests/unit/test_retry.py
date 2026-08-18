@@ -172,3 +172,114 @@ def test_retry_exceptions_to_raise():
 
     with pytest.raises(ValueError):
         raises_value_error()
+
+def test_should_retry_can_reject_an_exception_by_looking_inside_it():
+    """
+    Test that should_retry decides per exception, not per exception type.
+
+    Scenario:
+    - One exception class carries a status code that says whether the failure
+      is worth another attempt -- the shape of a real API client, where a
+      "service unavailable" and a "you are not allowed to do that" arrive as
+      the same class.
+    - should_retry returns False for this one.
+
+    Expected behavior:
+    - The function is called exactly once.
+    - The exception reaches the caller unchanged.
+
+    Why this matters:
+    - Retrying a permanent failure makes a real problem take three times as
+      long to report, and buries it under retry noise in the log.
+    - exceptions_to_raise cannot express this, because both failures share a
+      class; only the value inside them differs.
+    """
+    class StatusError(Exception):
+        def __init__(self, status):
+            super().__init__(f"status {status}")
+            self.status = status
+
+    call_count = 0
+
+    @retry(
+        exceptions=(StatusError,),
+        tries=3,
+        delay=0.01,
+        should_retry=lambda e: e.status >= 500,
+    )
+    def not_allowed():
+        nonlocal call_count
+        call_count += 1
+        raise StatusError(403)
+
+    with pytest.raises(StatusError):
+        not_allowed()
+    assert call_count == 1
+
+
+def test_should_retry_still_retries_what_it_accepts():
+    """
+    Test that should_retry returning True leaves normal retrying alone.
+
+    Scenario:
+    - The same status-carrying exception, but a 503 this time, which the
+      predicate accepts.
+    - The call succeeds on the third attempt.
+
+    Expected behavior:
+    - The function is called 3 times and returns normally.
+
+    Why this matters:
+    - Confirms the predicate narrows what is retried without breaking the
+      retrying itself, which is the whole point of the option.
+    """
+    class StatusError(Exception):
+        def __init__(self, status):
+            super().__init__(f"status {status}")
+            self.status = status
+
+    call_count = 0
+
+    @retry(
+        exceptions=(StatusError,),
+        tries=3,
+        delay=0.01,
+        should_retry=lambda e: e.status >= 500,
+    )
+    def briefly_unavailable():
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise StatusError(503)
+        return "ok"
+
+    assert briefly_unavailable() == "ok"
+    assert call_count == 3
+
+
+def test_without_should_retry_everything_caught_is_still_retried():
+    """
+    Test that leaving should_retry unset preserves the original behavior.
+
+    Scenario:
+    - No should_retry argument at all, as every existing caller in the
+      pipeline is written.
+
+    Expected behavior:
+    - All 3 attempts are made, exactly as before the option existed.
+
+    Why this matters:
+    - The scrapers and the Claude API calls all rely on the old behavior.
+      Adding an option must not quietly change what they do.
+    """
+    call_count = 0
+
+    @retry(exceptions=(RetryTestError,), tries=3, delay=0.01)
+    def always_fails():
+        nonlocal call_count
+        call_count += 1
+        raise RetryTestError("fail")
+
+    with pytest.raises(RetryTestError):
+        always_fails()
+    assert call_count == 3
