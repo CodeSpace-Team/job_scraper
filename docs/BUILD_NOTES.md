@@ -526,3 +526,78 @@ One real problem surfaced only once the board was live: the six sample jobs seed
 | `frontend/src/App.jsx`, `frontend/src/components/`, `frontend/src/hooks/useJobs.js` | The page itself — search bar, filter panel, job cards, data fetching |
 
 ---
+
+## Surviving a bad day at Google
+
+**Done:** 18 August 2026
+
+### The problem
+
+Twice now, on two different days, a run has done everything right and still put nothing in the Sheet.
+
+The first time it was a dropped connection — "Connection reset by peer" — and 240 jobs that had been scraped, screened and leveled went nowhere because of one network blip. That was fixed at the time: the connection is retried, and if it fails anyway the run saves a rescue copy and carries on to the Exclude tab and the board instead of stopping dead.
+
+The second time was this:
+
+```
+[06:53:48] Authenticating with Google Sheets...
+[06:53:49] ✗ Sheets write error: Could not open spreadsheet:
+           APIError: [503]: The service is currently unavailable.
+```
+
+One second between those two lines. The retry added for the first failure never fired at all.
+
+The reason is a detail that is easy to miss: gspread reports a Google-side outage as its own `APIError`, which is not a `ConnectionError`. The retry only covered network errors, so a 503 sailed straight past it as though no retry existed. 661 jobs scraped and enriched, 183 screened and kept, eighteen minutes of work — and the Jobs tab did not move.
+
+What is worth recording is everything that *did* survive, because that part was the earlier fix working exactly as designed. The Exclude tab, written moments later, went through. The board published its 183 jobs and the run committed `jobs.json`. A rescue copy of all 183 landed in `combined_jobs_fallback.json`. The run still reported red, so the failure was not hidden. Only the Jobs tab was stale, and only for that day.
+
+### What we built
+
+The retry now covers gspread's `APIError` as well — but only for the statuses that mean the problem is at Google's end: 429, 500, 502, 503 and 504. Four attempts, three seconds apart and doubling, which covers about twenty-one seconds of outage.
+
+Getting that right needed something the retry decorator could not previously do. gspread reports *everything* as `APIError`: a 503 outage and a 403 "this sheet was never shared with the service account" arrive as the same class, and the class alone cannot tell them apart. So `@retry` gained an optional `should_retry` — instead of only asking what class an exception is, a caller can now look inside it and answer per exception.
+
+### Why we did it this way
+
+**A permanent failure is still reported immediately.** A 400, 403 or 404 fails on the first attempt, exactly as before. This is the half of the change that was easy to get wrong: catching `APIError` and retrying all of it would mean a genuine setup mistake — the kind someone hits on their very first run, before the sheet has been shared — takes four attempts and twenty seconds to report, with the real reason buried under retry noise. Retrying a problem that retrying cannot fix does not make the system more robust; it just makes it slower to tell you the truth.
+
+**The status is read twice.** gspread takes the status out of the JSON error body Google returns, and falls back to storing -1 when that body is not valid JSON — which is precisely what a plain HTML error page from a load balancer during an outage looks like. So the response's own status code is used as a second opinion. An outage is the moment when tidy JSON is least likely to arrive, which is exactly the moment this has to work.
+
+**Twenty-one seconds, not six.** The old window was three attempts two seconds apart. Against an eighteen-minute run, waiting a little longer costs nothing, and it is only ever spent on runs that were failing anyway.
+
+### What we chose not to do
+
+**We did not retry the whole Sheet write — only the opening of it.** Appending rows is not safe to blindly repeat: the check for what is already in the sheet happens before the append, not during it, so a retry after a partly-completed append could write the same jobs twice. Opening a spreadsheet reads nothing and changes nothing, which is what makes it safe to try again.
+
+**We did not add any new alerting.** The run already exits red and the workflow's own failure notification already fires. The gap was never in noticing; it was that a failure worth one more attempt was not getting one.
+
+### One thing that needed care
+
+**A type hint that was a promise the code could not keep.** The `should_retry` option was first annotated as taking a `BaseException` — meaning "this predicate must handle any exception at all". But a predicate written for a specific API only handles *that* API's error class, which is narrower. A type checker rejects that, and correctly: a function that accepts less than promised cannot stand in for one that accepts more.
+
+The fix was not to annotate the callers, which would only have moved the same complaint to the call site. The honest hint is `Callable[..., bool]`: whatever the predicate receives is always one of the classes the caller listed in `exceptions`, but that connection between two separate arguments cannot be expressed, and naming any concrete type there would be wrong in one direction or the other.
+
+Caught by Pylance on the laptop that runs the project, not by the tests, which passed throughout — the same way the locale bug in F6's salary formatter surfaced. A second machine keeps finding things the first one cannot.
+
+### How to check it is working
+
+- **Tests**: `python -m pytest tests/unit/test_retry.py tests/unit/test_sheets_retry.py -q` from `backend/` — 25 tests, covering every status that is retried, every status that is not, and the growing gaps between attempts.
+- **In the run log, on a bad day**: Phase 3 taking a few seconds longer than usual and then succeeding is a retry that worked. The same `✗ Sheets write error` line appearing after about twenty seconds instead of one is an outage that outlasted four attempts.
+- **On a good day there is nothing to see**, which is the point. This code only does anything when Google is having trouble.
+
+### Still open
+
+**Whether this would have saved the run it was written for is a fair question, and the answer is probably.** The outage cleared quickly enough that the Exclude tab write seconds later went through — that is the best available evidence that a second attempt three seconds on would have found Google back up. It is evidence, not proof.
+
+**The Jobs tab is the one thing with no automatic recovery.** If all four attempts fail, `combined_jobs_fallback.json` holds the day's jobs but nothing replays it — the write would be re-run by hand. Whether that is worth automating depends on how often this actually happens: twice in the project's life so far, both times transient, both times cleared on their own. Not enough evidence yet to justify building a replay step.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `backend/src/utils/retry.py` | The `should_retry` option — deciding per exception, not per exception type |
+| `backend/src/writers/sheets.py` | Which statuses are Google's problem, and reading the status out of two places |
+| `backend/tests/unit/test_retry.py` | 7 tests, 3 of them on the new option |
+| `backend/tests/unit/test_sheets_retry.py` | 18 tests, covering both what is retried and what deliberately is not |
+
+---
