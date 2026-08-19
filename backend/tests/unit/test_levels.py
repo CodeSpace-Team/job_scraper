@@ -93,7 +93,6 @@ def test_a_junior_prefix_still_wins_over_manager():
     assert level == JUNIOR
 
 
-
 def test_a_title_spanning_a_range_takes_the_lower_rung():
     """'Junior to Mid' is open to a junior, so it is a junior job."""
     level, _evidence = level_from_title("Junior to Mid Developer")
@@ -235,6 +234,7 @@ def test_the_rules_beat_the_ai():
     job = make_job("Junior Developer", ai_level="senior")
     assert derive_level(job)["level"] == JUNIOR
 
+
 @pytest.mark.parametrize("value,expected", [
     ("Intern", ENTRY),
     ("internship", ENTRY),
@@ -330,3 +330,27 @@ def test_log_levels_prints_the_breakdown(capsys):
     assert "1 of 2 = 50%" in output
     assert "senior" in output
     assert "unknown" in output
+
+
+# ─── Supervisor, found by F1's non-tech measurement ─────────────────────────
+
+def test_a_supervisor_is_above_the_cohort():
+    """
+    "Quality Assurance Supervisor" at a food company reached the sheet: the
+    title matches F1's QA accept rule, the AI called it "Quality Assurance
+    Manager", and nothing in the title says food -- only the employer does.
+    No title blocklist can catch that one.
+
+    But it did not need catching on those grounds. A supervisor supervises,
+    which is not a job anyone holds in their first three years, so F4 should
+    have dropped it on level regardless of what industry it is in. The rule
+    already knew about manager, head of, VP and director; supervisor was
+    simply missing from the list.
+    """
+    assert level_from_title("Quality Assurance Supervisor")[0] == LEAD
+    assert level_from_title("IT Support Supervisor")[0] == LEAD
+
+
+def test_a_junior_title_still_beats_supervisor():
+    """The lowest rung still wins, the same as every other title rule."""
+    assert level_from_title("Junior Developer (reports to Supervisor)")[0] == JUNIOR

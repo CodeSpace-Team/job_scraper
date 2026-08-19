@@ -98,7 +98,9 @@ _TITLE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     (JUNIOR, re.compile(r"\b(junior|jnr\.?|jr\.?)\b", re.I)),
     (MID, re.compile(r"\b(mid[\s\-]?level|intermediate)\b", re.I)),
     (SENIOR, re.compile(r"\b(senior|snr\.?|sr\.?|architect)\b", re.I)),
-    (LEAD, re.compile(r"\b(lead|leader|staff|head of|manager|vp|vice president|director)\b", re.I)),
+    (LEAD, re.compile(
+        r"\b(lead|leader|staff|head of|manager|supervisor|vp|vice president|"
+        r"director)\b", re.I)),
     (PRINCIPAL, re.compile(r"\b(principal|chief)\b", re.I)),
 )
 
@@ -310,7 +312,6 @@ def derive_level(job: Dict[str, Any]) -> Dict[str, str]:
     return {"level": UNKNOWN, "source": "none", "evidence": "", "confidence": "none"}
 
 
-
 # ─── Pipeline Step ──────────────────────────────────────────────────────────
 
 def apply_levels(jobs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -336,7 +337,7 @@ def apply_levels(jobs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     for job in jobs:
         if "ai_job_level" not in job:
-            job["ai_job_level"] = job.get("job_level", "") or ""
+            job["ai_job_level"] = normalise_level(job.get("job_level"))
 
         result = derive_level(job)
         job["job_level"] = result["level"]
