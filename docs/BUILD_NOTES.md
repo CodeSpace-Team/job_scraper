@@ -71,6 +71,8 @@ Six jobs out of 255, and the difference is toward dropping more rather than fewe
 
 The target is "less than 5 out of every 100 new rows is a non-tech job". The first live run only added 22 new rows to the sheet, which is nowhere near enough to measure that properly. It needs a few more days of running before we can call it.
 
+> **Measured on 19 August, and it was failing** — 5 non-tech in a sample of 60, against a target of 3. See *Measuring F1 for the first time* at the end of these notes for what leaked, why, and what was fixed.
+
 Worth deciding separately: the Jobs sheet still holds 5,312 rows from before this screen existed, and none of them were ever checked. The target only applies to new rows going forward, so the old non-tech jobs are still sitting in there. Cleaning up the history is not in the brief.
 
 ### Files
@@ -370,6 +372,8 @@ More search terms means more raw jobs scraped, which means more jobs sent to the
 
 **F1 still runs on the AI's label, not on `role_type`.** Once there is a few days of the two sitting side by side in the run log, that becomes its own small decision — not blocked on anything else in F7.
 
+> **Decided on 19 August: no.** Four fifths of the disagreements come from the search-term fallback, which never looks at the job — swapping would have put around 284 non-tech jobs in front of graduates. The caution above was right. See *Two decisions closed by counting*.
+
 ### Files
 
 | File | What it does |
@@ -427,6 +431,7 @@ Caught before shipping, while writing the tests for it rather than on a live run
 
 - **In the run log**, `[PHASE 1.7]` prints the keyword fill rate before the AI runs at all — how many jobs already have enough skills without costing anything. `[PHASE 2.4]` prints it again after enrichment and the tidy-up, broken down by source: keyword, ai, or none.
 - **Watch the "keyword" share over a few real days.** That number is the evidence the deferred cost decision needs — the higher it climbs, the more room there is to start skipping enrichment for jobs it already covers.
+  > **This does not work, and cannot.** Enrichment runs for every job and always writes a blurb, so the tidy-up relabels every job `ai` and the keyword share is pinned at zero. Read `needs_ai_skills` instead, which is set before enrichment and never overwritten. See *Two decisions closed by counting*.
 - **In the sheet**, `must_have_skills` should never show two spellings of the same thing across different rows. If "JS" ever appears instead of "JavaScript", something is reaching the sheet without going through this module.
 
 ### Still open
@@ -434,6 +439,8 @@ Caught before shipping, while writing the tests for it rather than on a live run
 **We have not seen this run against live data yet.** The matcher and the tidy-up are both tested against made-up ads and a full pipeline smoke test, not a real day's worth of postings.
 
 **The cost-reduction decision is still open, on purpose.** Once there are a few real days of `skills_source` and `needs_ai_skills` in the run log, that becomes its own decision — whether keyword matching alone is finding enough to skip the AI for some jobs, and by how much it would cut the daily bill.
+
+> **Counted on 19 August: the saving is real (53% of jobs) but locked.** Those jobs also depend on enrichment for the board's blurb and the role label F1 screens on. See *Two decisions closed by counting*.
 
 ### Files
 
@@ -445,7 +452,6 @@ Caught before shipping, while writing the tests for it rather than on a live run
 | `tests/unit/test_skills.py` | 40 tests, including the three `skills_source` scenarios the bug fix depends on |
 
 ---
-
 ## F6 — The job board
 
 **Done:** 15 August 2026 (verified against a live run, restyled to CodeSpace's branding, and polished with sorting/search, 16 August 2026)
@@ -534,7 +540,6 @@ One real problem surfaced only once the board was live: the six sample jobs seed
 | `frontend/src/App.jsx`, `frontend/src/components/`, `frontend/src/hooks/useJobs.js` | The rest of the page — search bar, sort control, job cards, data fetching |
 
 ---
-
 ## Surviving a bad day at Google
 
 **Done:** 18 August 2026
@@ -607,5 +612,178 @@ Caught by Pylance on the laptop that runs the project, not by the tests, which p
 | `backend/src/writers/sheets.py` | Which statuses are Google's problem, and reading the status out of two places |
 | `backend/tests/unit/test_retry.py` | 7 tests, 3 of them on the new option |
 | `backend/tests/unit/test_sheets_retry.py` | 18 tests, covering both what is retried and what deliberately is not |
+
+---
+## Measuring F1 for the first time
+
+**Done:** 19 August 2026
+
+### The problem
+
+F1's target has been written down since the day it shipped: *fewer than 5 in every 100 rows reaching the sheet is a non-tech job*. It had never been measured. The first live run only added 22 new rows, far too few to judge, and after that it quietly stayed on the "still open" list for a week while everything else got attention.
+
+That is a comfortable place for a target to sit. Nobody had to find out whether the filter that decides what a graduate sees was actually working.
+
+### What we built
+
+A third mode on the weekly review tool, `python -m src.pipeline.qa --check tech`. It samples the jobs that reached the sheet and asks one question about each: **is this actually a tech job?**
+
+Getting the population right was most of the work. No run saves the kept jobs anywhere. The leveled file holds everything the pipeline handled, screening happens after it is written, and the excluded file holds only the drops — so "what reached the sheet" has to be worked out as one minus the other, matched by web address. Get that subtraction wrong and F1's pass rate gets measured over the very jobs F1 rejected, which would flatter it beyond recognition. Most of the new tests point at that one function.
+
+The sheet also flags which adverts are worth opening. A job whose title matches F1's accept list on its own — "Full Stack Java Developer" — settles itself. A job whose title says nothing tech is on the sheet purely on the AI's say-so, and that is where a person is needed. Those rows sort to the top.
+
+### What it found
+
+A sample of 60, drawn from the 171 jobs that reached the sheet on 19 August. Five were confirmed non-tech by reading the adverts:
+
+| Job | Employer | What the AI called it |
+| :--- | :--- | :--- |
+| GTM Operations Analyst | Mimecast | Data Analyst |
+| HSE Data Insights Advisor | BP | Data Analyst |
+| Junior Actuarial Analyst | King Price Insurance | Data Analyst |
+| Quality Assurance Supervisor | AVI (food and consumer goods) | Quality Assurance Manager |
+| Junior Product Developer | SMD Technologies (consumer electronics) | Product Developer |
+
+Five in sixty is 8%, against a target of three. **F1 was failing, and had been the whole time.**
+
+Look at the third column. Three separate jobs — sales operations, health and safety, and insurance actuarial work — all arrived at F1 wearing the same badge: *Data Analyst*. F1 accepts a bare data analyst, so all three walked through.
+
+That is the same mistake F1's own source file warns about, four lines above the accept list:
+
+> *a bare "engineer" is deliberately NOT accepted — that is the exact looseness that let mining and civil engineers through*
+
+F1 learned that lesson for *engineer* and never applied it to anything else. *Analyst*, *developer* and *quality assurance* are the same kind of word: occupational nouns that every industry uses, meaning something different in each. A developer writes software in tech and recipes in food. Quality assurance is test automation in tech and hygiene compliance in manufacturing.
+
+### What we fixed
+
+**Three blocklist entries, for the three that came in as "Data Analyst".** The titles were the honest signal in every case — *GTM Operations*, *HSE*, *Actuarial* — and the title blocklist runs before the AI's label is ever consulted. `hse` sat beside `sheq` and `occupational health`, which were already there; only that spelling was missing.
+
+**A fourth for the consumer-goods product developer**, and a fifth thing that turned out not to be an F1 problem at all.
+
+**The Quality Assurance Supervisor needed no F1 change.** Nothing in that title says food — only the employer does — so no title blocklist could ever have caught it. But it did not need catching on those grounds: a supervisor supervises, which is not a job anyone holds in their first three years. F2's above-cohort title rule already knew about manager, head of, VP and director; `supervisor` was simply missing from the list. Added there, F4 now drops it on level regardless of industry, and catches every other supervisor role too.
+
+After both changes, all five are caught and every confirmed-tech job in the sample still reaches the sheet.
+
+### Why we did it this way
+
+**Two of the new entries name the role, not the field.** Bare "actuarial" would drop an *Actuarial Systems Developer*, and bare "product developer" would drop a *Software Product Developer* — both real software jobs at employers who are not software companies. So the blocklist takes `actuarial analyst` and its siblings, and excuses the tech-qualified product developers by name:
+
+```python
+r"(?<!software )(?<!digital )(?<!technical )product developer",
+```
+
+That is the same shape the accept list already uses in refusing a bare "engineer" while taking "software engineer". Both halves of both rules are pinned by tests, because the failure mode of over-blocking is invisible: a graduate never learns about the job they did not see.
+
+**The measurement samples 60, not 20.** The other two weekly checks use 20, and for a "18 out of 20" target that is exactly right. It cannot work here. A 5% target measured over 20 jobs can only ever produce 0%, 5% or 10% — one wrong job *is* the pass mark, so a single unlucky draw decides whether F1 passes. The sheet prints a warning saying so whenever the sample is under 40.
+
+**The check needs a person, and always will.** F1 screens on the AI's label. Asking the AI to grade F1's output is asking it to mark its own homework — and this project already learned in F2 what the AI's labels are worth, when it called a plain "Test Analyst" a *lead* and F4 was about to delete it. The whole point of this target is to catch what those labels get wrong.
+
+### What we chose not to do
+
+**We did not tighten the accept list.** Removing bare "data analyst" would have caught three of the five in one line. It would also have dropped *Data Analyst (Power BI / SQL)* and *Graduate Data Analyst (AI and Analytics)*, both confirmed real in the same sample. Blocking the specific non-tech roles costs nothing; loosening what counts as a tech job costs real listings.
+
+**We did not try to catch the food-company QA job from its title.** It is genuinely impossible — "Quality Assurance Supervisor" is a perfectly plausible software title. Reaching it would need the description or the employer's industry, and F4 got there by a better route anyway.
+
+### One thing that needed care
+
+**Reading a title is not reading the advert, and I got two wrong.** Working through the sample by title and employer, *Business Process Specialist* at Linde and *Technical Developer – Fresh Foods* at Shoprite both read as obviously non-tech. Both turned out to be real software jobs on opening the advert — Shoprite staffs developers to its divisions, and "technical developer" there means what it says.
+
+Two false accusations out of seven. If either had been acted on without the advert being read, the fix would have started dropping genuine jobs, and nothing downstream would ever have reported it. Both are now pinned by tests so a later widening of the blocklist cannot quietly start dropping them.
+
+The triage that decides which adverts to open has the same limitation, and it is worth stating plainly: it flagged 4 of the 5 real leaks, and missed the food-company QA job entirely because "quality assurance" is in F1's accept list. It is useful for ordering the reading, not for deciding what to skip.
+
+### How to check it is working
+
+- **Run it** after unzipping a run's artifact: `python -m src.pipeline.qa --check tech --size 60` from `backend/`. It writes `data/qa/tech-sample-DATE.md`.
+- **Open the ones marked `look`** — those are on the sheet for a reason weaker than their own title. Skim the rest; do not skip them.
+- **Keep the filled-in file.** It is the record that the check was done, the same as the weekly level samples.
+- **Tests**: `pytest -q` from `backend/` — 489 across the project, including the five real leaks and the two jobs wrongly suspected.
+
+### Still open
+
+**The 0-in-60 result cannot be trusted yet.** That number is measured on the sample the fix was built from, which always flatters. The honest confirmation is another `--check tech --size 60` against a fresh run — different jobs, no circularity. Worth doing in a few days.
+
+**Whether data analytics is in scope at all is a question for CodeSpace, not a bug.** A *Graduate Data Analyst* at a logistics company came up in the sample and was kept. None of the brief's seven tracks is "Data", so whether that job belongs on the board is a scoping decision for Emma rather than something F1 got wrong.
+
+**The same class of leak almost certainly remains.** Five were found by reading sixty adverts. The mechanism — bare occupational nouns accepted regardless of industry — is general, and there is no reason to think these five were the only ones. Each measurement will find a few more; that is what the check is for.
+
+---
+
+## Two decisions closed by counting
+
+**Done:** 19 August 2026
+
+### The problem
+
+Two decisions had been left deliberately open, both waiting on real data rather than on an argument.
+
+F7 built a rules-based role classifier and then refused to let F1 screen on it, on the grounds that the only evidence was made-up titles. F5 built a free keyword skills matcher and recorded `needs_ai_skills` next to every job, but deliberately did not act on it, because the saving was a guess until there were real days to count.
+
+Both were the right call at the time. Both had been sitting open for a week with the data quietly accumulating, and neither was going to close itself.
+
+### What we built
+
+A read-only script, `python -m scripts.decision_check`, that reads a run's own artifact and answers both with counts. Like `morning_check`, it touches nothing and works offline.
+
+### What it found: F1 should not screen on role_type
+
+Over 671 jobs, F1's keep-or-drop and F7's classifier agree on 380 of them — 57%. The interesting number is the 284 that F1 dropped but the classifier calls tech, and where those tracks came from:
+
+| Where the classifier got the track | Jobs |
+| :--- | ---: |
+| The search term that found the job | 227 (80%) |
+| The description | 54 (19%) |
+| The title | 3 (1%) |
+
+Four fifths of the disagreements come from a tier that never looks at the job. `search_term` means "Indeed returned this for a technical support search, so call it Technical Support" — which is how a waiter at a Protea Hotel and a warehouse coordinator both acquired tech tracks. That fallback exists to rescue vague titles like "2026 Programme". On real data it instead launders Indeed's loose matching into a confident label, which is the exact failure F1 exists to prevent.
+
+Had we made the swap, roughly 284 non-tech jobs would have gone in front of graduates. **F7's refusal to wire it in without evidence was right, and this is the run that proves it.**
+
+The useful half of that table: the title tier disagreed with F1 only three times out of 284. The classification rules are not the problem — the fallbacks are.
+
+### What it found: the enrichment saving is real but locked
+
+Keyword matching alone found enough skills for 357 of 671 jobs — 53%. That is the ceiling on what could skip AI enrichment, and it is a genuine half-the-bill saving.
+
+It cannot be taken. Enrichment does not only fill skills; it writes the blurb the board shows and the `primary_role` that F1 screens on. All 357 depend on both. Skipping enrichment breaks F1 for precisely the jobs it skips — and the decision above means F1 cannot move off `primary_role` onto `role_type`, which was the only route to unblocking it.
+
+So the two questions turned out to be one question with an order, and the first answer closes the second.
+
+### Why we did it this way
+
+**`role_type` stays as a label, not a gate.** It is still recorded, still shown on the board, and still worth having. It is simply not fit to decide whether a graduate sees a job.
+
+**Counting first, arguing second.** Both of these could have been settled by a confident opinion in either direction, and both opinions would have been wrong: the classifier looked good enough to trust, and the enrichment saving looked easy to take. Thirty lines of counting changed both answers.
+
+### One thing that needed care
+
+**The metric F5's notes tell you to watch can never move.** They say to watch the "keyword" share of `skills_source` over a few real days. On this run it read: `ai` 526, `none` 145, `keyword` 0.
+
+That is not a bad day. Enrichment runs for every job and always writes a blurb, and the tidy-up step relabels a job's source as `ai` whenever a blurb is present — correctly, since the AI's list is what survives. So the keyword share is structurally pinned at zero and always will be, as long as every job goes through enrichment.
+
+The number that actually works is `needs_ai_skills`, which is set before enrichment and never overwritten. The guidance in F5's entry should be read as pointing at that instead.
+
+### How to check it is working
+
+- `python -m scripts.decision_check` from `backend/`, after unzipping a run's artifact. Both questions, one page.
+- **The number to watch on question one** is the `search_term` share of the disagreements. If it ever drops sharply, the classifier's fallbacks have been tightened and the swap becomes worth re-examining.
+
+### Still open
+
+**The board's role filter is unreliable for some live listings, and that is a separate problem.** The 284 mislabelled jobs never reach the board, because F1 drops them. But `role_type` is what the board's own filter runs on, and in a sample of 60 kept jobs about 10 got their track from the search term. A *RevOps Data Analyst* showed as **Security** because the employer is a security company and the word is all over the description; two *Data Engineers* showed as **DevOps/Cloud** purely because of which search found them. Smaller than the F1 problem and worth fixing after it.
+
+**The enrichment skip is closed until something changes.** Either F1 moves off the AI's label — which needs the classifier's fallbacks fixed first — or the cost pressure returns. Neither is true today. If the bill ever bites, there is a middle path that does not need either: keep enrichment for every job but send a shorter request for the 357 that already have skills, asking only for the blurb and the role label.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `backend/src/pipeline/qa.py` | The three weekly checks, including F1's non-tech mode and its triage |
+| `backend/tests/unit/test_qa.py` | 27 tests, mostly on working out which jobs reached the sheet |
+| `backend/src/pipeline/screening.py` | Five new blocklist entries, two of them naming the role rather than the field |
+| `backend/tests/unit/test_screening.py` | The five real leaks, and the two jobs wrongly suspected |
+| `backend/src/pipeline/levels.py` | `supervisor` added to the above-cohort title rule |
+| `backend/tests/unit/test_levels.py` | The supervisor case, and the lowest-rung rule still winning |
+| `backend/scripts/decision_check.py` | Counts the evidence for the two decisions F7 and F5 parked |
 
 ---
