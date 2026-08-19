@@ -184,9 +184,21 @@ _TITLE_BLOCKLIST: Tuple[str, ...] = (
     r"human resources", r"recruitment consultant", r"talent acquisition",
     r"marketing", r"copywriter", r"social media",
     r"receptionist", r"personal assistant", r"admin clerk", r"data captur\w+",
+    r"gtm", r"go[\s\-]?to[\s\-]?market",
+    # Insurance and finance work that reads as analysis but is not tech.
+    # The role is named rather than the field, on purpose: an "Actuarial
+    # Systems Developer" is a real software job at an insurer and has to
+    # survive, so bare "actuarial" is deliberately not blocked.
+    r"actuarial (?:analyst|specialist|associate|consultant)",
+    # Consumer goods, not software. A bare "product developer" in South
+    # Africa is almost always someone developing a physical product --
+    # electronics, food, packaging. The tech-qualified forms are real
+    # software jobs though, so they are excluded by name, the same way the
+    # accept list refuses a bare "engineer" but takes "software engineer".
+    r"(?<!software )(?<!digital )(?<!technical )product developer",
     # Facilities
     r"cleaner", r"security guard", r"security officer", r"safety officer",
-    r"sheq", r"occupational health",
+    r"sheq", r"hse", r"occupational health",
 )
 
 _BLOCKLIST_COMPILED = re.compile(
@@ -326,7 +338,6 @@ def screen_above_cohort(job: Dict[str, Any]) -> Tuple[bool, str, bool]:
 
 
 # ─── Both screens ───────────────────────────────────────────────────────────
-
 
 def screen_jobs(
     jobs: Sequence[Dict[str, Any]],

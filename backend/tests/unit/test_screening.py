@@ -31,7 +31,6 @@ def make_job(title="", primary_role="", **extra):
     return job
 
 
-
 def leveled(title="Software Developer", level="", years=None, **extra):
     """Build a tech job that has already been through F2 and F3."""
     job = make_job(title, "Developer", job_level=level, **extra)
@@ -207,8 +206,6 @@ def test_log_screening_runs_without_error(capsys):
     assert "screened 2 jobs" in output
     assert "dropped 1" in output
     assert "Mining Engineer" in output
-
-
 
 # ─── F4: the first three years ──────────────────────────────────────────────
 
@@ -394,3 +391,115 @@ def test_log_reports_both_screens(capsys):
     assert "F4 dropped as above the cohort" in output
     assert "flagged for QA review" in output
     assert "[REVIEW]" in output
+
+
+# ─── Real leaks found by F1's own non-tech measurement ──────────────────────
+# The first real measurement of F1's "fewer than 5 in every 100" target found
+# 5 non-tech jobs in a sample of 60 -- 8%, against a target of 3. Every one
+# of them reached the sheet because the AI labelled it with a bare
+# occupational noun that F1's accept list takes at face value: three separate
+# jobs arrived as "Data Analyst", one as "Quality Assurance Manager", one as
+# "Product Developer". The titles are the honest signal, so the fix is in the
+# title blocklist, which runs before the label is ever consulted.
+
+def test_an_hse_advisor_is_not_a_data_analyst():
+    """
+    Confirmed non-tech. Health, safety and environment work at BP, which
+    the AI labelled "Data Analyst" -- and F1 accepts a bare data analyst.
+    "sheq" and "occupational health" were already blocked; the "hse"
+    spelling was the gap.
+    """
+    keep, reason, rule = screen_non_tech(
+        {"title": "HSE Data Insights Advisor", "primary_role": "Data Analyst"}
+    )
+    assert keep is False
+    assert rule == "title_blocklist"
+
+
+def test_an_actuarial_analyst_is_not_a_data_analyst():
+    """Confirmed non-tech. Insurance actuarial work, labelled "Data Analyst"."""
+    keep, _reason, rule = screen_non_tech(
+        {"title": "Junior Actuarial Analyst", "primary_role": "Data Analyst"}
+    )
+    assert keep is False
+    assert rule == "title_blocklist"
+
+
+def test_an_actuarial_systems_developer_survives():
+    """
+    The other half of that rule, and the reason "actuarial" alone is not
+    blocked. Insurers do employ real software developers on actuarial
+    systems, and blocking the field rather than the role would drop them --
+    the same mistake as blocking "mining" instead of "mining engineer".
+    """
+    keep, _reason, _rule = screen_non_tech(
+        {"title": "Actuarial Systems Developer", "primary_role": "Software Engineer"}
+    )
+    assert keep is True
+
+
+def test_a_go_to_market_analyst_is_not_a_data_analyst():
+    """Confirmed non-tech. Sales and marketing operations, labelled "Data Analyst"."""
+    for title in ("GTM Operations Analyst", "Go-To-Market Analyst"):
+        keep, _reason, rule = screen_non_tech(
+            {"title": title, "primary_role": "Data Analyst"}
+        )
+        assert keep is False, title
+        assert rule == "title_blocklist", title
+
+
+def test_a_real_data_analyst_still_gets_through():
+    """
+    None of this may cost a genuine data job. These two were confirmed
+    tech in the same sample.
+    """
+    for title in ("Data Analyst (Power BI / SQL)", "Graduate Data Analyst (AI and Analytics)"):
+        keep, _reason, _rule = screen_non_tech(
+            {"title": title, "primary_role": "Data Analyst"}
+        )
+        assert keep is True, title
+
+
+def test_the_two_jobs_wrongly_suspected_still_get_through():
+    """
+    Both of these were read as non-tech from their titles and turned out to
+    be real tech jobs on reading the advert. Pinned so that a later widening
+    of the blocklist cannot quietly start dropping them.
+    """
+    keep, _reason, _rule = screen_non_tech(
+        {"title": "Business Process Specialist", "primary_role": "Business Analyst"}
+    )
+    assert keep is True
+
+    keep, _reason, _rule = screen_non_tech(
+        {"title": "Technical Developer - Fresh Foods", "primary_role": "Product Developer"}
+    )
+    assert keep is True
+
+
+def test_a_bare_product_developer_is_consumer_goods():
+    """
+    Confirmed non-tech: a consumer-electronics distributor's product
+    developer, which the AI labelled "Product Developer" -- a label F1's
+    accept list takes at face value because it contains "developer".
+    """
+    keep, _reason, rule = screen_non_tech(
+        {"title": "Junior Product Developer", "primary_role": "Product Developer"}
+    )
+    assert keep is False
+    assert rule == "title_blocklist"
+
+
+def test_a_tech_qualified_product_developer_survives():
+    """
+    The other half of that rule. "Software Product Developer" is a real
+    software job, and blocking the bare role without excusing the qualified
+    forms would drop it -- the same shape as the accept list refusing a
+    bare "engineer" while taking "software engineer".
+    """
+    for title in ("Software Product Developer", "Digital Product Developer",
+                  "Technical Product Developer"):
+        keep, _reason, _rule = screen_non_tech(
+            {"title": title, "primary_role": "Software Engineer"}
+        )
+        assert keep is True, title
