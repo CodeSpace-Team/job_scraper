@@ -16,6 +16,15 @@ F4 uses the same tool. Pointed at ``excluded_jobs.json`` it shows why each
 job was dropped, which is how we catch a job that was dropped by mistake --
 the thing that matters most, since a graduate never sees it.
 
+F1 uses it too, in ``--check tech`` mode. F1's target is "fewer than 5 in
+every 100 rows reaching the sheet is a non-tech job", and no count can
+answer that on its own: deciding whether a job really is a tech job needs a
+person to read the ad. So this builds that sheet as well.
+
+That mode needs both files, because no run saves the kept jobs on their own.
+"Kept" is everything in the leveled file that does not appear in the
+excluded file, so both get read and one subtracted from the other.
+
 Usage
 -----
     # The weekly level check
@@ -23,6 +32,9 @@ Usage
 
     # Review what got dropped
     python -m src.pipeline.qa -i data/cache/excluded_jobs.json
+
+    # F1's non-tech rate, over the jobs that actually reached the sheet
+    python -m src.pipeline.qa --check tech
 
     # A bigger sample, saved somewhere specific
     python -m src.pipeline.qa --size 50 -o data/qa/big-check.md
@@ -54,8 +66,25 @@ DEFAULT_SIZE = 20
 TARGET_CORRECT = 18
 """How many of the 20 need to be right for F2 to be passing."""
 
+DEFAULT_EXCLUDED = "data/cache/excluded_jobs.json"
+"""The dropped jobs, needed to work out which jobs were kept."""
+
+TECH_TARGET_RATE = 0.05
+"""
+F1 passes when fewer than 5 in every 100 rows reaching the sheet is non-tech.
+
+Held as a rate rather than a count because the honest sample size for it is
+not 20. At 20 jobs the only measurable answers are 0%, 5%, 10% -- a single
+wrong job is exactly the pass mark, so one unlucky draw decides it. The
+report says so rather than pretending 20 settles the question.
+"""
+
 OUTPUT_DIR = "data/qa"
 """Where review sheets are saved."""
+
+MODE_LEVEL = "level"
+MODE_DROPS = "drops"
+MODE_TECH = "tech"
 
 
 # ─── Helper Functions ───────────────────────────────────────────────────────
@@ -82,6 +111,49 @@ def sample_jobs(
 
     picker = random.Random(seed)
     return picker.sample(list(jobs), min(size, len(jobs)))
+
+
+def job_identity(job: Dict[str, Any]) -> str:
+    """
+    A stable identity for matching one job across two of a run's files.
+
+    The web address is what the pipeline dedupes on, so it is what lines up
+    between the leveled file and the excluded file. Jobs without one fall
+    back to title and company -- weaker, but better than quietly dropping
+    them out of the comparison.
+
+    Args:
+        job: Job dictionary.
+
+    Returns:
+        A key that is the same in both files for the same job.
+    """
+    url = str(job.get("job_url", "") or "").strip()
+    if url:
+        return url
+    return f"{job.get('title', '')}|{job.get('company', '')}".strip().lower()
+
+
+def kept_jobs(
+    leveled: Sequence[Dict[str, Any]],
+    excluded: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Work out which jobs actually reached the sheet.
+
+    No run saves this list. The leveled file holds everything the pipeline
+    handled, screening happens after it is written, and the excluded file
+    holds only what was dropped -- so the kept jobs are the difference.
+
+    Args:
+        leveled: Every job the run handled, from combined_jobs_leveled.json.
+        excluded: Every job the screens dropped, from excluded_jobs.json.
+
+    Returns:
+        The jobs that survived both screens, in their original order.
+    """
+    dropped = {job_identity(job) for job in excluded}
+    return [job for job in leveled if job_identity(job) not in dropped]
 
 
 def _cell(value: Any, limit: int = 60) -> str:
@@ -116,6 +188,97 @@ def target_for(size: int) -> int:
         How many need to be right.
     """
     return round(size * TARGET_CORRECT / DEFAULT_SIZE)
+
+
+def build_tech_report(
+    jobs: Sequence[Dict[str, Any]],
+    total_jobs: int,
+    source_file: str,
+) -> str:
+    """
+    Build F1's non-tech review sheet.
+
+    A different question from the other two, and the only one that measures
+    a target the brief states as a rate. The reviewer is asked one thing per
+    job: is this actually a tech job? Anything answered "no" is a job F1 let
+    through that it should have caught.
+
+    Both labels the pipeline holds are shown -- the AI's `primary_role`,
+    which is what F1 screened on, and F7's `role_type`, which is what the
+    board's own filter shows a graduate. They can disagree, and when a job
+    turns out to be non-tech it is worth seeing which of them was fooled.
+
+    Args:
+        jobs: The sampled jobs, drawn from the kept ones.
+        total_jobs: How many jobs reached the sheet in this run.
+        source_file: Which files the sample was drawn from.
+
+    Returns:
+        The review sheet as markdown.
+    """
+    today = date.today().isoformat()
+    allowed = int(len(jobs) * TECH_TARGET_RATE)
+
+    lines: List[str] = []
+    lines.append(f"# Non-tech check (F1) — {today}")
+    lines.append("")
+    lines.append(
+        f"- Sample of **{len(jobs)}** jobs, drawn from the {total_jobs} that "
+        f"reached the sheet"
+    )
+    lines.append(f"- Source: `{source_file}`")
+    lines.append(
+        f"- Target: fewer than **{TECH_TARGET_RATE:.0%}** non-tech, so at most "
+        f"**{allowed} of {len(jobs)}**"
+    )
+    lines.append("- One question per job: **is this actually a tech job?**")
+    lines.append("  Mark `no` for anything that is not. Everything else, leave blank.")
+    lines.append("")
+
+    if 0 < len(jobs) < 40:
+        step = 1 / len(jobs)
+        lines.append(
+            f"> A sample of {len(jobs)} measures a {TECH_TARGET_RATE:.0%} target "
+            f"only roughly — one wrong job moves the result by {step:.0%}. "
+            f"Either take a bigger sample (`--size 60`) or add several weeks "
+            f"of these together before calling the target met or missed."
+        )
+        lines.append("")
+
+    columns = [
+        "#", "Job Title", "Company", "AI called it", "Board shows", "Non-tech?",
+    ]
+    lines.append("| " + " | ".join(columns) + " |")
+    lines.append("|" + "|".join(" :--- " for _ in columns) + "|")
+
+    for index, job in enumerate(jobs, start=1):
+        title = _cell(job.get("title"), 45)
+        url = str(job.get("job_url", "") or "")
+        linked = f"[{title}]({url})" if url else title
+
+        company = _cell(job.get("company"), 28)
+        ai_label = _cell(job.get("primary_role"), 30) or "(none)"
+
+        track = _cell(job.get("role_type"), 24) or "(none)"
+        source = _cell(job.get("role_source"), 12)
+        board = f"{track} ({source})" if source else track
+
+        lines.append(
+            f"| {index} | {linked} | {company} | {ai_label} | {board} |  |"
+        )
+
+    lines.append("")
+    lines.append("## Score")
+    lines.append("")
+    lines.append(f"Non-tech: ___ of {len(jobs)}   (target: at most {allowed})")
+    lines.append("")
+    lines.append("For each one marked non-tech, note the job and which word should")
+    lines.append("have caught it — that is what turns a miss into a blocklist entry:")
+    lines.append("")
+    lines.append("- ")
+    lines.append("")
+
+    return "\n".join(lines)
 
 
 def build_report(
@@ -227,6 +390,18 @@ Examples:
         help=f"Jobs file to sample from (default: {DEFAULT_INPUT})",
     )
     parser.add_argument(
+        "--check", choices=[MODE_LEVEL, MODE_TECH], default=MODE_LEVEL,
+        help="Which question to build a sheet for. 'level' is F2's weekly "
+             "check, and switches itself to reviewing drops when pointed at "
+             "the excluded file. 'tech' is F1's non-tech rate over the jobs "
+             "that reached the sheet (default: level)",
+    )
+    parser.add_argument(
+        "-x", "--excluded", default=DEFAULT_EXCLUDED,
+        help=f"Dropped jobs, used by --check tech to work out which jobs "
+             f"were kept (default: {DEFAULT_EXCLUDED})",
+    )
+    parser.add_argument(
         "-o", "--output", default=None,
         help=f"Where to save the review sheet (default: {OUTPUT_DIR}/level-sample-DATE.md)",
     )
@@ -251,13 +426,35 @@ Examples:
         log(f"No jobs found in {input_path}.")
         sys.exit(1)
 
+    source = str(input_path)
+    prefix = "level-sample"
+
+    if args.check == MODE_TECH:
+        excluded_path = Path(args.excluded)
+        if not excluded_path.exists():
+            log(f"ERROR: {excluded_path} not found.")
+            log("--check tech needs it to work out which jobs were kept.")
+            sys.exit(1)
+
+        jobs = kept_jobs(jobs, load_jobs(excluded_path) or [])
+        if not jobs:
+            log("Every job in this run was dropped. Nothing reached the sheet.")
+            sys.exit(1)
+
+        source = f"{input_path} minus {excluded_path}"
+        prefix = "tech-sample"
+
     chosen = sample_jobs(jobs, size=args.size, seed=args.seed)
-    report = build_report(chosen, total_jobs=len(jobs), source_file=str(input_path))
+
+    if args.check == MODE_TECH:
+        report = build_tech_report(chosen, total_jobs=len(jobs), source_file=source)
+    else:
+        report = build_report(chosen, total_jobs=len(jobs), source_file=source)
 
     if args.output:
         output_path = Path(args.output)
     else:
-        output_path = Path(OUTPUT_DIR) / f"level-sample-{date.today().isoformat()}.md"
+        output_path = Path(OUTPUT_DIR) / f"{prefix}-{date.today().isoformat()}.md"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(report, encoding="utf-8")
