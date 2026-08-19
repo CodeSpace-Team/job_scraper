@@ -23,6 +23,7 @@ from src.pipeline.qa import (
     TECH_TARGET_RATE,
     build_report,
     build_tech_report,
+    needs_a_look,
     job_identity,
     kept_jobs,
     sample_jobs,
@@ -219,3 +220,67 @@ def test_sampling_asks_for_more_than_there_are():
 def test_the_tech_rate_target_is_the_brief_s_number():
     assert TECH_TARGET_RATE == 0.05
     assert MODE_TECH == "tech"
+
+
+# ─── Triage: which adverts actually need opening ────────────────────────────
+
+def test_a_clear_tech_title_does_not_need_a_look():
+    """A "Full Stack Java Developer" settles itself. No advert needed."""
+    job = {"title": "Full Stack Java Developer", "role_source": "title"}
+    assert needs_a_look(job) is False
+
+
+def test_a_title_that_says_nothing_tech_needs_a_look():
+    """
+    The exact leak this was built for. An HSE advisor reaches the sheet only
+    because the AI labelled it "Data Analyst" -- the title itself matches
+    nothing in F1's accept list, so a person has to judge it.
+    """
+    job = {"title": "HSE Data Insights Advisor", "role_source": "description"}
+    assert needs_a_look(job) is True
+
+
+def test_a_tech_title_still_needs_a_look_when_the_track_came_from_the_search():
+    """
+    Second signal, and it catches what the first one misses. "People Data
+    analyst" contains "data analyst", so the title check passes it -- but
+    F7's classifier could not read the job either and fell back to whichever
+    search found it. Two weak signals together are worth one look.
+    """
+    job = {"title": "People Data analyst", "role_source": "search_term"}
+    assert needs_a_look(job) is True
+
+
+def test_a_missing_title_needs_a_look():
+    assert needs_a_look({}) is True
+
+
+def test_the_sheet_puts_the_thin_evidence_first():
+    jobs = [
+        {"title": "Full Stack Developer", "role_source": "title"},
+        {"title": "Transport Analyst", "role_source": "search_term"},
+        {"title": "QA Engineer", "role_source": "title"},
+    ]
+    report = build_tech_report(jobs, total_jobs=100, source_file="x")
+    body = report[report.index("| # |"):]
+
+    assert body.index("Transport Analyst") < body.index("Full Stack Developer")
+    assert "**look**" in body
+
+
+def test_the_sheet_says_how_many_need_opening():
+    jobs = [
+        {"title": "Full Stack Developer", "role_source": "title"},
+        {"title": "Transport Analyst", "role_source": "search_term"},
+    ]
+    report = build_tech_report(jobs, total_jobs=100, source_file="x")
+
+    assert "Open the advert for the 1 marked `look`" in report
+    assert "The other 1 can be judged from the title" in report
+
+
+def test_a_sheet_where_everything_is_clear_says_nothing_about_looking():
+    jobs = [{"title": "Full Stack Developer", "role_source": "title"}]
+    report = build_tech_report(jobs, total_jobs=100, source_file="x")
+
+    assert "Open the advert" not in report

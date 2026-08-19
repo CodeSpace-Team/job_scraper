@@ -52,6 +52,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+from src.pipeline.screening import match_accepted_role
 from src.utils import load_jobs, log
 
 
@@ -156,6 +157,42 @@ def kept_jobs(
     return [job for job in leveled if job_identity(job) not in dropped]
 
 
+def needs_a_look(job: Dict[str, Any]) -> bool:
+    """
+    Decide whether a kept job needs its advert opened, or can be skimmed.
+
+    Reviewing 60 adverts properly would take an hour, and most of them do
+    not need it -- "Full Stack Java Developer" settles itself in the title.
+    The ones that need a person are those sitting on the sheet for a reason
+    weaker than their own title.
+
+    Two signals, either of which is enough:
+
+    1. **The title does not match F1's accept list on its own.** F1 keeps a
+       job on the AI's role label first and the title only as a fallback, so
+       a job whose title says nothing tech is there purely on the AI's
+       say-so. That is exactly how an HSE advisor arrives wearing a "Data
+       Analyst" badge.
+    2. **F7's classifier could not read the job either**, and fell back to
+       the search term that found it. Independent evidence that neither the
+       title nor the description says what this job is.
+
+    This decides nothing about whether a job is tech. It only says where
+    the evidence is thin, the same way F4 flags its softer drops for review.
+
+    Args:
+        job: A kept job.
+
+    Returns:
+        True when the advert is worth opening.
+    """
+    title = str(job.get("title", "") or "")
+    if not match_accepted_role(title):
+        return True
+
+    return str(job.get("role_source", "") or "") == "search_term"
+
+
 def _cell(value: Any, limit: int = 60) -> str:
     """
     Make a value safe to drop into a markdown table cell.
@@ -235,6 +272,23 @@ def build_tech_report(
     lines.append("  Mark `no` for anything that is not. Everything else, leave blank.")
     lines.append("")
 
+    # Thin evidence first, so the adverts worth opening are not scattered
+    # through sixty rows. Order is stable within each group, so a --seed
+    # sample still reproduces exactly.
+    flagged = [job for job in jobs if needs_a_look(job)]
+    skimmable = [job for job in jobs if not needs_a_look(job)]
+    ordered = flagged + skimmable
+
+    if flagged:
+        lines.append(
+            f"**Open the advert for the {len(flagged)} marked `look`.** Those are "
+            f"on the sheet for a reason weaker than their own title — either the "
+            f"title says nothing tech and only the AI's label kept them, or F7's "
+            f"classifier could not read them either. The other "
+            f"{len(skimmable)} can be judged from the title in a second."
+        )
+        lines.append("")
+
     if 0 < len(jobs) < 40:
         step = 1 / len(jobs)
         lines.append(
@@ -246,12 +300,12 @@ def build_tech_report(
         lines.append("")
 
     columns = [
-        "#", "Job Title", "Company", "AI called it", "Board shows", "Non-tech?",
+        "#", "", "Job Title", "Company", "AI called it", "Board shows", "Non-tech?",
     ]
     lines.append("| " + " | ".join(columns) + " |")
     lines.append("|" + "|".join(" :--- " for _ in columns) + "|")
 
-    for index, job in enumerate(jobs, start=1):
+    for index, job in enumerate(ordered, start=1):
         title = _cell(job.get("title"), 45)
         url = str(job.get("job_url", "") or "")
         linked = f"[{title}]({url})" if url else title
@@ -263,8 +317,9 @@ def build_tech_report(
         source = _cell(job.get("role_source"), 12)
         board = f"{track} ({source})" if source else track
 
+        mark = "**look**" if needs_a_look(job) else ""
         lines.append(
-            f"| {index} | {linked} | {company} | {ai_label} | {board} |  |"
+            f"| {index} | {mark} | {linked} | {company} | {ai_label} | {board} |  |"
         )
 
     lines.append("")
