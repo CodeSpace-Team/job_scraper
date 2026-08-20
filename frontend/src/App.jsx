@@ -64,7 +64,10 @@ export default function App() {
         <div className="flex flex-col gap-6 md:flex-row">
           <FilterPanel facets={facets} filters={filters} onChange={setFilters} />
 
-          <div className="flex-1">
+          {/* min-w-0 for the same reason as in JobCard: without it this
+              column cannot shrink below the widest card it contains, and a
+              single long job title pushes the layout past the screen. */}
+          <div className="min-w-0 flex-1">
             {loading ? (
               <div className="flex items-center gap-2 text-sm text-neutral-600">
                 <span
