@@ -103,13 +103,75 @@ def test_a_rescraped_job_keeps_its_original_date_added():
     assert result[0]["date_added"] == "2026-08-01"
 
 
-def test_a_job_missing_title_or_company_is_never_matched_and_always_kept():
+def test_a_job_with_no_title_no_company_and_no_link_is_always_kept():
+    """Nothing to match on is not evidence that two jobs are the same."""
     existing = [make_job(title="", company="", date_added="2026-08-01")]
     incoming = [make_job(title="", company="")]
 
     result = merge(existing, incoming, today=date(2026, 8, 15))
 
     assert len(result) == 2
+
+
+# ─── merge: the apply link ──────────────────────────────────────────────────
+
+def test_the_same_apply_link_is_the_same_advert():
+    existing = [make_job(job_url="https://indeed/jk=1", date_added="2026-08-01")]
+    incoming = [make_job(title="Junior Developer (Cape Town)",
+                         job_url="https://indeed/jk=1")]
+
+    result = merge(existing, incoming, today=date(2026, 8, 15))
+
+    assert len(result) == 1
+    assert result[0]["title"] == "Junior Developer (Cape Town)"
+    assert result[0]["date_added"] == "2026-08-01"
+
+
+def test_an_ad_with_no_company_does_not_pile_up_day_after_day():
+    """
+    The defect that put one Power Platform advert on six rows of the live
+    board and one ABAP advert on five.
+
+    F9's key needs a title *and* a company before it will match, and plenty
+    of Indeed ads carry no company at all. Those matched nothing, every day,
+    and were appended again on every run. The apply link is what settles it:
+    Indeed's jk is the posting's own id.
+    """
+    board = []
+    for day in range(1, 6):
+        board = merge(
+            board,
+            [make_job(company="", job_url="https://indeed/jk=abap")],
+            today=date(2026, 8, day),
+        )
+
+    assert len(board) == 1
+    assert board[0]["date_added"] == "2026-08-01"
+
+
+def test_two_different_adverts_are_still_two_rows():
+    """
+    The link check adds a way to match; it must not take one away. Two
+    genuinely different jobs at the same employer stay two rows.
+    """
+    existing = [make_job(title="Junior Developer", job_url="https://indeed/jk=1")]
+    incoming = [make_job(title="Junior QA Analyst", job_url="https://indeed/jk=2")]
+
+    result = merge(existing, incoming, today=date(2026, 8, 15))
+
+    assert len(result) == 2
+
+
+def test_the_title_key_still_matches_when_the_link_has_changed():
+    """The same advert reached through two different links (F9's own key)."""
+    existing = [make_job(job_url="https://indeed/jk=1", date_added="2026-08-01")]
+    incoming = [make_job(job_url="https://pnet/12345")]
+
+    result = merge(existing, incoming, today=date(2026, 8, 15))
+
+    assert len(result) == 1
+    assert result[0]["job_url"] == "https://pnet/12345"
+    assert result[0]["date_added"] == "2026-08-01"
 
 
 def test_merge_is_safe_on_an_empty_board():
