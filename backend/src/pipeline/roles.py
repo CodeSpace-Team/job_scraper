@@ -214,38 +214,105 @@ _ROLE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
 )
 
 
+# ─── Description rules ──────────────────────────────────────────────────────
+# A deliberately narrower set, and the reason is a real failure on the live
+# board. The rules above are safe on a title, where every word is about the
+# vacancy. Run over a job's body text they are not: an "HPE ATP Compute
+# Solutions Certified Engineer" -- infrastructure work -- came out as
+# Software development because its description mentioned Python somewhere in
+# 1500 characters, and graduates filtering by role type were shown it as a
+# software job.
+#
+# So the description may only be matched on phrases that *name a role*. A
+# technology is not a role: a job mentioning Python is no more a software
+# development job than a job mentioning Excel is an accountancy one. Bare
+# "developer" is out for the same reason -- "you will work alongside our
+# developers" describes the team, not the vacancy.
+#
+# Same discipline F2 already applies to levels, where the level word has to
+# sit against a role word before it counts.
+
+_DESCRIPTION_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
+    (SECURITY, re.compile(
+        r"\b(cyber\s?security (?:analyst|engineer|specialist)|"
+        r"information security (?:analyst|officer|specialist)|"
+        r"soc analyst|penetration tester)\b", re.I)),
+
+    (QA, re.compile(
+        r"\b(quality assurance (?:engineer|analyst|specialist)|"
+        r"software tester|test analyst|test engineer|automation tester|"
+        r"sdet)\b", re.I)),
+
+    (MOBILE, re.compile(
+        r"\b(mobile (?:developer|engineer)|android developer|ios developer|"
+        r"mobile application developer)\b", re.I)),
+
+    (DEVOPS, re.compile(
+        r"\b(devops engineer|site reliability engineer|cloud engineer|"
+        r"cloud architect|platform engineer|infrastructure engineer)\b", re.I)),
+
+    (BUSINESS_ANALYSIS, re.compile(
+        r"\b(business analyst|systems analyst|solutions analyst|"
+        r"business systems analyst|business intelligence developer|"
+        r"process analyst)\b", re.I)),
+
+    (SUPPORT, re.compile(
+        r"\b(it support (?:technician|analyst|engineer|specialist)|"
+        r"service desk (?:analyst|engineer|technician)|"
+        r"help ?desk (?:analyst|technician)|desktop support technician|"
+        r"technical support (?:engineer|analyst|specialist))\b", re.I)),
+
+    (SOFTWARE, re.compile(
+        r"\b(software developer|software engineer|"
+        r"full[\s\-]?stack (?:developer|engineer)|"
+        r"front[\s\-]?end (?:developer|engineer)|"
+        r"back[\s\-]?end (?:developer|engineer)|"
+        r"web developer|application developer|systems developer|"
+        r"integration developer)\b", re.I)),
+)
+
+
 def classify_role(
     title: str,
     description: str = "",
     hint: Optional[str] = None,
 ) -> Tuple[str, str]:
     """
-    Give a job exactly one role type from the fixed list.
+    Give a job at most one role type from the fixed list.
 
-    The title is trusted first; the description is only consulted when the
-    title says nothing useful. When neither is conclusive, the search term
-    that found the job supplies the fallback (a hit from "it internship" is
-    still an IT job even if the title is just "2026 Programme").
+    The title decides where it can. Failing that the description is checked,
+    but only against phrases that name a role (see _DESCRIPTION_RULES). If
+    neither says what the job is, the answer is nothing.
+
+    **The search term the job was found by is deliberately not used.** It was,
+    once, on the reasoning that a hit from "it internship" is still an IT job
+    even when the title only says "2026 Programme". Measured against real
+    data that reasoning did not survive: of 284 jobs where this classifier
+    disagreed with F1's own screening, 227 -- four fifths -- had been given
+    their track by the search term alone. Indeed matches loosely, so a
+    "technical support" search returns waiters and warehouse coordinators,
+    and this tier was stamping them Technical Support without ever reading
+    the job. That is the exact looseness F1 exists to undo.
+
+    The `hint` argument is still accepted so existing callers do not break,
+    and is ignored.
 
     Args:
         title: Job title.
         description: Job description text.
-        hint: Fallback role type from the search term, if any.
+        hint: Ignored. Kept for call compatibility.
 
     Returns:
         (role_type, source) — role_type is '' when nothing matched, and
-        source is one of 'title', 'description', 'search_term' or ''.
+        source is one of 'title', 'description' or ''.
     """
     for role, pattern in _ROLE_RULES:
         if title and pattern.search(title):
             return role, "title"
 
-    for role, pattern in _ROLE_RULES:
+    for role, pattern in _DESCRIPTION_RULES:
         if description and pattern.search(description[:1500]):
             return role, "description"
-
-    if hint in ROLE_TYPES:
-        return hint, "search_term"
 
     return "", ""
 
@@ -258,7 +325,13 @@ def apply_roles(jobs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     Sets on each job:
         role_type    — one of ROLE_TYPES, or '' when undecidable
-        role_source  — title | description | search_term | ''
+        role_source  — title | description | ''
+
+    A job whose title and description both say nothing gets no track at all,
+    and shows under no role-type filter on the board. That is the intended
+    outcome: a blank is honest, a wrong track is not, and the board's filter
+    is the one place a wrong label directly costs a graduate a job they were
+    looking for.
 
     Deliberately does not touch 'primary_role'. That field is the AI's own
     label, and F1's screening still reads it to decide keep or drop. Role
@@ -275,10 +348,12 @@ def apply_roles(jobs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
         The same job dictionaries, with a role type.
     """
     for job in jobs:
+        # No hint is passed any more. The search term that found a job says
+        # nothing about what the job is -- see classify_role for the numbers
+        # that settled that.
         role, source = classify_role(
             job.get("title", ""),
             job.get("description_snippet", ""),
-            hint=job.get("search_role_hint") or role_for_term(job.get("search_term", "")),
         )
         job["role_type"] = role
         job["role_source"] = source
