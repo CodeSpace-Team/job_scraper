@@ -163,8 +163,13 @@ def level_from_years(years: Optional[int]) -> str:
     """
     Map a years-of-experience figure onto a level.
 
-    The bands follow the brief's appendix: entry level needs no prior
-    experience, junior is 0-2 years, mid is 2-4.
+    The bands, stated the way the code actually applies them rather than the
+    appendix's rounder wording: 0 is entry level, 1-2 junior, 3-4 mid, 5-7
+    senior, 8+ lead. Every band is closed, so no figure lands between two.
+
+    Only the first two ship (see ``screening.PUBLISHED_LEVELS``), which puts
+    the boundary that matters between 2 and 3: an ad asking for three years
+    is asking for more than somebody in their first years of work has.
 
     Args:
         years: Years asked for, or None.
