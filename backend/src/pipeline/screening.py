@@ -2,10 +2,10 @@
 screening.py — keep or drop, with a reason for every drop (F1, F4)
 ===================================================================
 
-Two screens run here, back to back, and neither deletes anything. A dropped
-job keeps its full record and goes to the Exclude tab with the reason written
-next to it, so the drops can be reviewed and later used to train a better
-filter.
+Three screens run here, back to back, and none of them deletes anything. A
+dropped job keeps its full record and goes to the Exclude tab with the reason
+written next to it, so the drops can be reviewed and later used to train a
+better filter.
 
 F1 — only tech jobs
 -------------------
@@ -13,18 +13,36 @@ Indeed matches the words "engineer" and "developer" very loosely, which is how
 mining engineers, quantity surveyors and warehouse assistants ended up in the
 sheet. Nothing threw the wrong jobs out.
 
+Scope — only software development
+---------------------------------
+CodeSpace teaches software development. A QA analyst post, an IT support desk
+and a SOC analyst are all tech jobs and all pass F1, but none of them is what
+the students are being trained for, and on the live board they crowded out the
+jobs that were. So a job only ships if F7 gave it the Software development
+track, read off its own title or a role phrase in its own body text.
+
+Note what this is *not*: it is not a judgement that those tracks are worthless,
+and the pipeline still scrapes, enriches and classifies them. They are filed in
+the Exclude tab under this stage, so widening the scope later is a one-line
+change to ``PUBLISHED_ROLE_TYPES`` and a re-run, not a rebuild.
+
 F4 — the first three years of a career
 --------------------------------------
-The sheet should only carry jobs a person in their first three working years
-could actually get, so anything senior, lead or principal goes, as does
-anything asking for four or more years. Jobs with no level and no years stay:
-those ads are often open to anyone, and after the F2 amendment that is around
-a quarter of everything scraped -- dropping them would throw away the very
-roles this tool exists to surface.
+Only two levels ship: entry level and junior. Mid, senior, lead and principal
+are all above the cohort, as is anything asking for four or more years.
 
-F1 runs first. When a job fails both screens, "not a tech job" is the more
-useful reason to record: a Senior Quantity Surveyor belongs in the Exclude tab
-as a surveyor, not as a senior.
+Unknown goes too, and that is a reversal worth naming. Unknowns used to be
+kept, on the reasoning that an ad which says nothing about level is not
+evidence the job is out of reach -- and that is still true of any single ad.
+What it produced in aggregate was a board roughly half-filled with jobs whose
+level nobody had established, which is exactly what a graduate filtering for
+entry level is trying to avoid. A job that cannot show it is entry level or
+junior does not ship. The record is kept, flagged ``needs_review``, so the
+weekly QA pass can measure what that costs.
+
+F1 runs first, then scope, then F4. When a job fails several screens the
+earliest reason is the one recorded: a Senior Quantity Surveyor belongs in the
+Exclude tab as a surveyor, not as a senior.
 
 The F1 decision, in order
 -------------------------
@@ -69,7 +87,8 @@ Usage
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
-from src.pipeline.levels import LEAD, PRINCIPAL, SENIOR
+from src.pipeline.levels import ENTRY, JUNIOR, UNKNOWN
+from src.pipeline.roles import SOFTWARE
 from src.utils import log
 
 
@@ -78,14 +97,32 @@ from src.utils import log
 STAGE_NON_TECH = "F1 non-tech"
 """Label written to the Exclude tab's Stage column by the F1 screen."""
 
+STAGE_OFF_TRACK = "scope not software"
+"""Label written to the Exclude tab's Stage column by the scope screen."""
+
 STAGE_ABOVE_COHORT = "F4 above cohort"
 """Label written to the Exclude tab's Stage column by the F4 screen."""
 
 MAX_YEARS_FOR_COHORT = 4
 """An ad asking for this many years or more is above our graduates (F4)."""
 
-BLOCKED_LEVELS = frozenset({SENIOR, LEAD, PRINCIPAL})
-"""Levels beyond the first three years of a career (F4)."""
+PUBLISHED_ROLE_TYPES = frozenset({SOFTWARE})
+"""
+The only tracks that reach the sheet and the board.
+
+One entry, because CodeSpace teaches software development. Widening the scope
+is adding a role type here; nothing else in the pipeline needs to change,
+because every track is still scraped and classified.
+"""
+
+PUBLISHED_LEVELS = frozenset({ENTRY, JUNIOR})
+"""
+The only levels that reach the sheet and the board (F4).
+
+Everything else is above the cohort or unestablished. Membership is what
+decides -- not a blocklist -- so a level nobody has heard of cannot slip
+through by not being on a list of things to reject.
+"""
 
 SAMPLE_SIZE = 10
 """How many dropped titles to print in the run log, so precision is checkable."""
@@ -298,15 +335,45 @@ def screen_non_tech(job: Dict[str, Any]) -> Tuple[bool, str, str]:
     return False, f"role type not accepted ({said})", "role_not_accepted"
 
 
+# ─── Scope: software development only ───────────────────────────────────────
+
+def screen_off_track(job: Dict[str, Any]) -> Tuple[bool, str, bool]:
+    """
+    Decide whether a job is on a track CodeSpace actually teaches.
+
+    Reads the role type F7 worked out from the job's own title or body text.
+    The search term that found the job is deliberately not consulted -- see
+    ``roles.classify_role`` for the measurement that settled that.
+
+    Args:
+        job: Job dictionary, already classified by F7.
+
+    Returns:
+        A (keep, reason, needs_review) tuple. A job with no role type at all
+        is flagged for review: unclassified is not the same as off-track, and
+        how often it happens is worth watching.
+    """
+    role = job.get("role_type") or ""
+
+    if role in PUBLISHED_ROLE_TYPES:
+        return True, "", False
+
+    if not role:
+        return False, "no role type -- title and description named no role", True
+
+    source = job.get("role_source") or "unknown"
+    return False, f"role type is {role}, not software (from {source})", False
+
+
 # ─── F4: the first three years ──────────────────────────────────────────────
 
 def screen_above_cohort(job: Dict[str, Any]) -> Tuple[bool, str, bool]:
     """
-    Decide whether a job sits above the first three years of a career (F4).
+    Decide whether a job is one of the two levels a graduate can take (F4).
 
-    A job goes if its level is senior, lead or principal, or if the ad asks
-    for four or more years. Everything else stays, including jobs with no
-    level and no years -- those ads are usually open to anyone.
+    Only entry level and junior ship. Mid, senior, lead and principal are
+    above the cohort; so is an ad asking for four or more years; so is a job
+    whose level nobody could establish.
 
     Args:
         job: Job dictionary, already leveled by F2 and dated by F3.
@@ -318,9 +385,16 @@ def screen_above_cohort(job: Dict[str, Any]) -> Tuple[bool, str, bool]:
     level = job.get("job_level") or ""
     years = job.get("experience_years")
 
-    if level in BLOCKED_LEVELS:
+    if level not in PUBLISHED_LEVELS:
         source = job.get("level_source") or "unknown"
         evidence = job.get("level_evidence") or "nothing recorded"
+
+        if not level or level == UNKNOWN:
+            # Nothing was wrong with the ad; we simply could not tell. Always
+            # reviewable, because this is the drop most likely to cost a
+            # graduate a job they could have had.
+            return False, "level could not be established", True
+
         # A level read out of the body text is softer than one in the title.
         weak = source == "description"
         return False, f"level is {level} (from {source}: '{evidence}')", weak
@@ -337,7 +411,7 @@ def screen_above_cohort(job: Dict[str, Any]) -> Tuple[bool, str, bool]:
     return True, "", False
 
 
-# ─── Both screens ───────────────────────────────────────────────────────────
+# ─── All three screens ──────────────────────────────────────────────────────
 
 def screen_jobs(
     jobs: Sequence[Dict[str, Any]],
@@ -345,8 +419,11 @@ def screen_jobs(
     """
     Split a day's jobs into the ones we keep and the ones we exclude.
 
-    Runs F1 then F4. A job that fails F1 never reaches F4, so a non-tech job
-    is filed under the reason that actually matters.
+    Runs F1, then scope, then F4, and a job that fails one never reaches the
+    next -- so each job is filed under the first reason that disqualified it,
+    which is the one that actually matters. A Senior QA Engineer is filed as
+    off-track rather than as senior, because widening the scope is a decision
+    somebody might make and being senior is not.
 
     Excluded jobs are returned, never discarded, and each one carries:
         excluded_stage  -- which screen dropped it
@@ -369,6 +446,7 @@ def screen_jobs(
         "kept": 0,
         "dropped_title_blocklist": 0,
         "dropped_role_not_accepted": 0,
+        "dropped_off_track": 0,
         "dropped_above_cohort": 0,
         "dropped_total": 0,
         "needs_review": 0,
@@ -376,12 +454,21 @@ def screen_jobs(
 
     for job in jobs:
         # ── F1: is this a tech job at all? ──
-        keep, reason, rule = screen_non_tech(job)
+        keep, reason, kept_by = screen_non_tech(job)
         if not keep:
-            _record_drop(job, excluded, counts, STAGE_NON_TECH, reason, rule, False)
+            _record_drop(job, excluded, counts, STAGE_NON_TECH, reason, kept_by, False)
             continue
 
-        # ── F4: is it within the first three years? ──
+        # ── Scope: is it software development? ──
+        keep, reason, needs_review = screen_off_track(job)
+        if not keep:
+            _record_drop(
+                job, excluded, counts,
+                STAGE_OFF_TRACK, reason, "off_track", needs_review,
+            )
+            continue
+
+        # ── F4: is it entry level or junior? ──
         keep, reason, needs_review = screen_above_cohort(job)
         if not keep:
             _record_drop(
@@ -392,7 +479,7 @@ def screen_jobs(
 
         job["excluded_stage"] = ""
         job["excluded_reason"] = ""
-        job["excluded_rule"] = rule
+        job["excluded_rule"] = kept_by
         job["needs_review"] = False
         kept.append(job)
         counts["kept"] += 1
@@ -455,6 +542,8 @@ def log_screening(
         f"{counts.get('dropped_title_blocklist', 0)}")
     log(f"    F1 dropped on role not accepted: "
         f"{counts.get('dropped_role_not_accepted', 0)}")
+    log(f"    dropped as not software:         "
+        f"{counts.get('dropped_off_track', 0)}")
     log(f"    F4 dropped as above the cohort:  "
         f"{counts.get('dropped_above_cohort', 0)}")
     log(f"    flagged for QA review:           {counts.get('needs_review', 0)}")
