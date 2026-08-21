@@ -114,4 +114,42 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
   })
+  it('draws exactly as many cards as the count claims, even when two jobs share an apply link', async () => {
+    /*
+     * The defect Emma reported: the board said "4 of 377 jobs" with
+     * thirty-two cards under it, the first of them nothing to do with what
+     * she had filtered for.
+     *
+     * The cause was not the filtering -- filterJobs had it right all along.
+     * It was the card key. Twenty-one rows on the live board shared an apply
+     * link with another row, React does not error on repeated keys but
+     * mis-reconciles them, and on a filter change it left stale cards in the
+     * DOM. The count read from the filtered array and told the truth; the
+     * cards did not.
+     */
+    const user = userEvent.setup()
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            jobs: [
+              ...SAMPLE_JOBS,
+              { ...SAMPLE_JOBS[1], title: 'IT Support Technician (Cape Town)' },
+              { ...SAMPLE_JOBS[1], title: 'IT Support Technician (Durban)' },
+            ],
+          }),
+      }),
+    )
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('4 of 4 jobs')).toBeInTheDocument())
+    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(4)
+
+    await user.type(screen.getByLabelText('Search jobs'), 'React')
+
+    await waitFor(() => expect(screen.getByText('1 of 4 jobs')).toBeInTheDocument())
+    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(1)
+    expect(screen.getByText('Junior React Developer')).toBeInTheDocument()
+  })
 })
