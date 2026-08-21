@@ -236,3 +236,39 @@ def test_log_experience_prints_the_score(capsys):
     output = capsys.readouterr().out
     assert "1 of 2 = 50%" in output
     assert "text" in output
+
+# ─── The company's age is not the candidate's experience ────────────────────
+# Both of these are real sentences off the live board, and both produced
+# "0 years" -> entry level. That is how a "Developer Level 2" came to sit in a
+# graduate's entry-level results, which is what Emma opened the board and found.
+
+@pytest.mark.parametrize("text", [
+    "Games Global brings together over 300 years of combined gaming experience",
+    "With over 100 years of rich history and strongly held values",
+    "A business with 40 years of heritage in financial services",
+    "Celebrating 25 years of excellence in software delivery",
+    "We have been in the market for 30 years and counting",
+    "A firm with 15 years of combined experience across the team",
+])
+def test_a_companys_own_age_is_not_a_requirement(text):
+    assert extract_years(text)[0] is None
+
+
+def test_a_long_number_is_not_read_as_its_last_two_digits():
+    """
+    The mechanism underneath the bug: \\d{1,2} with nothing guarding either
+    end happily matched the "00" in "300 years". Every such sentence came out
+    as 0 -- the lowest possible answer, from the largest possible number.
+    """
+    assert extract_years("300 years of experience")[0] is None
+    assert extract_years("120 years of experience")[0] is None
+    assert extract_years("We ask for 12 years of experience")[0] == 12
+
+
+def test_a_real_requirement_next_to_a_company_boast_still_counts():
+    """The rejection has to be local to the phrase, not to the whole ad."""
+    text = (
+        "With over 100 years of rich history, we are looking for a developer "
+        "with at least 2 years of experience in C#."
+    )
+    assert extract_years(text)[0] == 2
