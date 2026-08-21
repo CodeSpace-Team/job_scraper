@@ -787,3 +787,70 @@ The number that actually works is `needs_ai_skills`, which is set before enrichm
 | `backend/scripts/decision_check.py` | Counts the evidence for the two decisions F7 and F5 parked |
 
 ---
+
+## Scope — entry level and junior software roles only
+
+### The problem
+
+Emma opened the board, ticked **Software development** and **entry level**, and the first result was a *Graduate Intern: Data Analytics*. Of the four the filter found, one was a real match. Her words: "By this, things are still a way off done."
+
+Three separate things were wrong, and each of them alone was enough to produce that screen.
+
+**1. Jobs were being given a track by the search phrase that found them.** Indeed matches loosely, so a search for "technical support" returns waiters and warehouse coordinators — and every one of them was stamped Technical Support without anything having read the job. Measured on live data: of 284 jobs where the role classifier disagreed with F1's own screening, 227 — four fifths — had got their track from the search term alone.
+
+**2. A technology mentioned anywhere in the body text was being read as the job's track.** An *HPE ATP Compute Solutions Certified Engineer* — infrastructure work — came out as Software development because its description said "Python" somewhere in 1500 characters.
+
+**3. The board was carrying levels and tracks nobody asked for.** Mid-level roles, and every tech track, when CodeSpace teaches software development.
+
+### What changed
+
+**The search term no longer decides anything.** A job's track now comes from its own title, or failing that from a phrase in its own body text that *names a role* — "software developer", "test analyst". A technology is not a role: a job mentioning Python is no more a software job than a job mentioning Excel is an accountancy one. Bare "developer" is out too, because "you will work alongside our developers" describes the team, not the vacancy.
+
+**A third screen decides scope.** Only `Software development` reaches the sheet and the board. Every other track is still scraped, still enriched, still classified — and filed on the Exclude tab under its own stage, so widening the scope later is one constant (`PUBLISHED_ROLE_TYPES`) and a re-run.
+
+**Only two levels ship.** Entry level and junior. Mid is out.
+
+### The reversal worth naming
+
+**Unknowns used to be kept and are now dropped.** The old reasoning was that an ad which says nothing about level is not evidence the job is out of reach — still true of any single ad. What it produced in aggregate was a board 183 of 377 filled with jobs nobody had leveled, which is the opposite of what somebody filtering for entry level wants. A job that cannot show it is entry level or junior does not ship. Every such drop is flagged `needs_review`, so the weekly QA pass can measure what it costs rather than assume.
+
+### The bug underneath "Developer Level 2"
+
+The single job Emma named turned out to be its own defect, and not in the screening at all.
+
+The ad said: *"brings together over 300 years of combined gaming experience"*. F3's number pattern was `\d{1,2}` with nothing guarding either end, so it matched the **"00"** in "300" — and the word "experience" sat right there to confirm it. Zero years is entry level. The whole chain then ran correctly on a number that was never in the ad. The same sentence shape did it again on Absa's *"with over 100 years of rich history"*, twice.
+
+Two fixes, both needed. The number pattern now refuses to match part of a longer number. And a company's own age is rejected outright — "of rich history", "of combined experience", "in business", "of excellence" — because the sentence is about the employer, not the applicant.
+
+### What it does to the board
+
+Run over the live board as published on 21 August: **377 jobs in, 20 out.**
+
+| Dropped by | Jobs |
+| :--- | ---: |
+| Not software (162 with no track at all, 132 on another tech track) | 294 |
+| Above the cohort — mid, senior, or no level established | 59 |
+| Non-tech title (F1, unchanged) | 4 |
+| **Reaching the board** | **20** |
+
+All 20 are real entry level or junior software developer jobs. Read against `date_added`, the 377 was six days of scraping including a backfill, so the honest steady-state figure is roughly **one to three new qualifying jobs a day**.
+
+That is the trade, stated plainly: the board is now correct and thin, where it was full and wrong. Widening it is two constants, and the evidence for which way to widen is on the Exclude tab.
+
+### How to check it is working
+
+- **In the run log**, the screening summary now has a line for `dropped as not software` alongside the F1 and F4 lines.
+- **On the Exclude tab**, the Stage column distinguishes `scope not software` from `F4 above cohort`, so "we are missing good jobs" and "we are showing wrong jobs" can be told apart without opening a single ad.
+- **On the board**, the role filter should offer one option and the level filter two. If a third level appears, a job reached the board without going through the screen.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `src/pipeline/screening.py` | `PUBLISHED_ROLE_TYPES`, `PUBLISHED_LEVELS`, and the new scope screen |
+| `src/pipeline/roles.py` | Track comes from the ad's own words; the search-term tier is gone |
+| `src/pipeline/experience.py` | Digit guards on the number pattern, and the company-age rejection |
+| `tests/unit/test_screening.py` | The scope screen, and the unknown-level reversal |
+| `tests/integration/test_leveling_pipeline.py` | "Developer Level 2" pinned end to end |
+
+---
