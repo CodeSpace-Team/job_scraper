@@ -113,13 +113,42 @@ def test_a_non_tech_title_is_left_undecided():
 
 # ─── The description is only consulted when the title says nothing ──────────
 
-def test_the_description_is_used_when_the_title_is_uninformative():
+def test_the_description_is_used_when_it_names_a_role():
     role, source = classify_role(
         "2026 Opportunities",
-        "Join our graduate developer programme building software.",
+        "Join our graduate programme as a software developer building tools.",
     )
     assert role == SOFTWARE
     assert source == "description"
+
+
+def test_a_technology_in_the_description_is_not_a_role():
+    """
+    The failure this rule was rewritten for. An HPE compute-solutions
+    engineer -- infrastructure work -- was labelled Software development on
+    the live board because its description mentioned Python. Graduates
+    filtering by role type were shown it as a software job.
+
+    A technology is not a role. Mentioning Python no more makes a job
+    software development than mentioning Excel makes it accountancy.
+    """
+    role, source = classify_role(
+        "HPE ATP - Compute Solutions Certified Engineer",
+        "Designing and implementing compute, virtualization and cloud "
+        "infrastructure solutions using HPE, VMware and Python scripting.",
+    )
+    assert role == ""
+    assert source == ""
+
+
+def test_a_bare_developer_mention_in_the_description_is_not_a_role():
+    """"You will work alongside our developers" describes the team, not the job."""
+    role, source = classify_role(
+        "2026 Opportunities",
+        "You will work alongside our developers and report to the manager.",
+    )
+    assert role == ""
+    assert source == ""
 
 
 def test_the_title_beats_the_description():
@@ -132,16 +161,24 @@ def test_the_title_beats_the_description():
     assert source == "title"
 
 
-# ─── The search term is the last resort ──────────────────────────────────────
+# ─── The search term is no longer used at all ───────────────────────────────
+# This tier used to exist, on the reasoning that a hit from searching "it
+# internship" is still an IT job even when the title only says "2026
+# Programme". Real data killed it: of 284 jobs where this classifier
+# disagreed with F1's screening, 227 -- four fifths -- had been given their
+# track by the search term alone. Indeed matches loosely, so a "technical
+# support" search returns waiters, and this tier stamped them Technical
+# Support without reading the job.
 
-def test_the_search_term_hint_is_used_when_title_and_description_say_nothing():
+def test_the_search_term_is_ignored_even_when_it_names_a_real_track():
     """
-    A hit from searching 'it internship' is still an IT job even when the
-    ad's own title is just '2026 Programme' and says nothing else useful.
+    The tier that caused the damage. Kept as a test rather than deleted,
+    because the reasoning behind it was plausible and somebody will be
+    tempted to add it back.
     """
     role, source = classify_role("2026 Programme", "", hint="Technical Support")
-    assert role == "Technical Support"
-    assert source == "search_term"
+    assert role == ""
+    assert source == ""
 
 
 def test_a_hint_outside_the_fixed_list_is_ignored():
