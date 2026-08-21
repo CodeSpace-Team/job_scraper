@@ -101,12 +101,30 @@ def merge(
     """
     Merge today's kept jobs into the board's running list.
 
-    A new job matching one already on the board -- by F9's own
-    title/company/city key -- replaces it rather than adding a second copy,
-    carrying over the original 'date_added' so the job's place in the
-    retention window does not reset just because it enriched slightly
-    differently today. A job with no comparable key (missing title or
-    company) is never matched and always kept as its own row.
+    A new job matching one already on the board replaces it rather than
+    adding a second copy, carrying over the original 'date_added' so the
+    job's place in the retention window does not reset just because it
+    enriched slightly differently today.
+
+    Two ways to match, checked in that order:
+
+    1. **The apply link.** Identical link, identical advert -- Indeed's
+       ``jk`` is the posting's own id, so there is nothing to weigh up.
+    2. **F9's title/company/city key**, for the same advert reached through
+       two different links.
+
+    The link check is not a nicety, it is what stops the board filling with
+    the same job. F9's key needs both a title and a company to be trusted,
+    and plenty of Indeed ads carry no company at all -- so an advert with a
+    blank company matched nothing, every day, and was appended again on
+    every run. On the live board that put one Power Platform post on six
+    separate rows and an ABAP post on five. It also broke the *front end*:
+    the board keys its cards by apply link, and React quietly mis-renders a
+    list whose keys repeat, so the count said four jobs while thirty-two
+    cards were on screen.
+
+    A job with neither a link nor a comparable key is never matched and is
+    always kept as its own row.
 
     Args:
         existing: The board's current jobs.
@@ -119,27 +137,37 @@ def merge(
     today_str = (today or date.today()).isoformat()
 
     by_key: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    by_link: Dict[str, Dict[str, Any]] = {}
     merged: List[Dict[str, Any]] = list(existing)
 
     for job in existing:
+        link = job.get("job_url") or ""
+        if link:
+            by_link.setdefault(link, job)
         key = duplicate_key(job)
         if is_comparable(key):
             by_key[key] = job
 
     for incoming in new_jobs:
         job = dict(incoming)
+        link = job.get("job_url") or ""
         key = duplicate_key(job)
 
-        old = by_key.get(key) if is_comparable(key) else None
+        old = by_link.get(link) if link else None
+        if old is None and is_comparable(key):
+            old = by_key.get(key)
+
         if old is not None:
             job["date_added"] = old.get("date_added", today_str)
             merged[merged.index(old)] = job
-            by_key[key] = job
         else:
             job.setdefault("date_added", today_str)
-            if is_comparable(key):
-                by_key[key] = job
             merged.append(job)
+
+        if link:
+            by_link[link] = job
+        if is_comparable(key):
+            by_key[key] = job
 
     return merged
 
