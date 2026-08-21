@@ -81,9 +81,29 @@ export default function App() {
                 <p className="mb-3 text-sm text-neutral-600">
                   {visible.length} of {jobs.length} jobs
                 </p>
+                {/* The index is part of the key on purpose. Keys have to be
+                    unique among siblings, and the apply link is not: the
+                    board carried the same Power Platform advert on six rows
+                    and the same ABAP advert on five, because a job with no
+                    company name matched nothing in the publisher's merge and
+                    was appended again every day.
+
+                    React does not error on repeated keys, it mis-reconciles
+                    -- on a filter change it left stale cards in the DOM, so
+                    the board said "4 of 377 jobs" above thirty-two cards.
+                    That is the screen Emma opened and reported.
+
+                    The publisher no longer creates those rows, but a key
+                    must not depend on data being clean to work. Appending
+                    the index makes it unique whatever arrives. It costs the
+                    re-use of a card's DOM node when the list reorders, which
+                    on a few hundred cards is not measurable. */}
                 <div className="space-y-3">
-                  {visible.map((job) => (
-                    <JobCard key={job.job_url || `${job.title}-${job.company}`} job={job} />
+                  {visible.map((job, i) => (
+                    <JobCard
+                      key={`${job.job_url || `${job.title}-${job.company}`}#${i}`}
+                      job={job}
+                    />
                   ))}
                 </div>
                 {visible.length === 0 && jobs.length > 0 && (
