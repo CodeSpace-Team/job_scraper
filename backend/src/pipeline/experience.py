@@ -53,7 +53,20 @@ _WORD_NUMBERS: Dict[str, int] = {
 }
 """Written-out numbers, because plenty of ads spell them out."""
 
-_NUMBER = r"(?:\d{1,2}|" + "|".join(_WORD_NUMBERS) + r")"
+_NUMBER = (
+    r"(?:(?<!\d)\d{1,2}(?!\d)|"
+    r"(?<![A-Za-z])(?:" + "|".join(_WORD_NUMBERS) + r")(?![A-Za-z]))"
+)
+"""
+One-or-two digits, or a written-out number.
+
+The digit guards are load-bearing rather than tidiness. Without them,
+``\\d{1,2}`` happily matches the *tail* of a longer number: "over 300 years
+of combined gaming experience" handed back "00" -> 0 years, and "with over
+100 years of rich history" did the same. Both are real sentences off the
+live board, and both came out as 0 years -> entry level, which is how a
+"Developer Level 2" ended up in a graduate's entry-level results.
+"""
 
 _EXPERIENCE_WORDS = (
     r"(?:experience|exp\.?|working|hands[\s\-]?on|industry|commercial|"
@@ -73,6 +86,23 @@ _NEGATIVE_AFTER = re.compile(
     re.IGNORECASE,
 )
 """Wording after the number that means it describes something else."""
+
+_COMPANY_HISTORY = re.compile(
+    r"^\W*(?:of\s+)?(?:rich\s+|proud\s+|long\s+)?"
+    r"(?:history|heritage|legacy|excellence|standing|combined|collective|"
+    r"in\s+(?:business|operation|the\s+industry|the\s+market))",
+    re.IGNORECASE,
+)
+"""
+Wording after the number that means it is the *company's* age, not what the
+job asks of a person.
+
+Ads open on this constantly -- "with over 100 years of rich history", "brings
+together over 300 years of combined gaming experience". The word
+"experience" is right there, so the context check above says yes; it is just
+somebody else's experience. Left alone these land as a low number and
+therefore a low level, which puts a job a graduate cannot do in front of one.
+"""
 
 
 # ─── Patterns ───────────────────────────────────────────────────────────────
@@ -183,8 +213,12 @@ def _is_rejected(text: str, start: int, end: int) -> bool:
         True if the match should be thrown away.
     """
     before = text[max(0, start - 25):start]
-    after = text[end:end + 25]
-    return bool(_NEGATIVE_BEFORE.search(before) or _NEGATIVE_AFTER.match(after))
+    after = text[end:end + 40]
+    return bool(
+        _NEGATIVE_BEFORE.search(before)
+        or _NEGATIVE_AFTER.match(after)
+        or _COMPANY_HISTORY.match(after)
+    )
 
 
 # ─── Extraction ─────────────────────────────────────────────────────────────
