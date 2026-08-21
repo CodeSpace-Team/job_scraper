@@ -320,6 +320,7 @@ def main() -> None:
     dropped_non_tech = (screen_counts.get('dropped_title_blocklist', 0)
                         + screen_counts.get('dropped_role_not_accepted', 0))
     log(f"Excluded (non-tech):   {dropped_non_tech}")
+    log(f"Excluded (not software): {screen_counts.get('dropped_off_track', 0)}")
     log(f"Excluded (too senior): {screen_counts.get('dropped_above_cohort', 0)}")
     log(f"Time taken: {minutes}m {seconds}s")
     if sheet_url:
