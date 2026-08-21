@@ -346,3 +346,47 @@ def test_a_real_escaped_plus_is_still_read():
     processed = apply_experience([job])
 
     assert processed[0]["experience_years"] == 5
+
+# ─── The job that started this ──────────────────────────────────────────────
+
+def test_developer_level_2_is_not_an_entry_level_job():
+    """
+    Emma filtered the board for software development at entry level and the
+    first thing she got back was a "Developer Level 2". Nothing in that ad
+    said entry level. What it said was:
+
+        "brings together over 300 years of combined gaming experience"
+
+    F3 read "00 years" out of "300 years", the experience word was right
+    there to confirm it, and 0 years is entry level. The whole chain ran
+    correctly on a number that was never in the ad.
+
+    Pinned end to end -- F3 then F2 -- because either half alone would let
+    it back in.
+    """
+    job = ad(
+        "Developer Level 2",
+        "Games Global brings together over 300 years of combined gaming "
+        "experience. You will build and maintain our platform services.",
+        company="Games Global",
+    )
+
+    processed = apply_levels(apply_experience([job]))[0]
+
+    assert processed["experience_years"] is None
+    assert processed["job_level"] == UNKNOWN
+
+
+def test_a_hundred_years_of_rich_history_is_not_a_level():
+    """The same sentence pattern, from a different employer on the same run."""
+    job = ad(
+        "AI Platform Engineer (Cloud)",
+        "With over 100 years of rich history and strongly held values, we "
+        "are looking for someone to join our cloud team.",
+        company="Absa",
+    )
+
+    processed = apply_levels(apply_experience([job]))[0]
+
+    assert processed["experience_years"] is None
+    assert processed["job_level"] == UNKNOWN
