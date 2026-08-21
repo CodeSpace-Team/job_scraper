@@ -11,16 +11,21 @@ Covers the three things F1 has to get right:
 
 import pytest
 
+from src.pipeline.roles import QA, SOFTWARE, SUPPORT
 from src.pipeline.screening import (
     MAX_YEARS_FOR_COHORT,
+    PUBLISHED_LEVELS,
+    PUBLISHED_ROLE_TYPES,
     STAGE_ABOVE_COHORT,
     STAGE_NON_TECH,
+    STAGE_OFF_TRACK,
     log_screening,
     match_accepted_role,
     match_blocked_title,
     screen_above_cohort,
     screen_jobs,
     screen_non_tech,
+    screen_off_track,
 )
 
 
@@ -32,7 +37,15 @@ def make_job(title="", primary_role="", **extra):
 
 
 def leveled(title="Software Developer", level="", years=None, **extra):
-    """Build a tech job that has already been through F2 and F3."""
+    """
+    Build a software job that has already been through F2, F3 and F7.
+
+    The role type is set here because the scope screen sits between F1 and
+    F4: without it every fixture would fail the wrong screen and these tests
+    would stop saying anything about levels.
+    """
+    extra.setdefault("role_type", SOFTWARE)
+    extra.setdefault("role_source", "title")
     job = make_job(title, "Developer", job_level=level, **extra)
     job.setdefault("level_source", "title")
     job.setdefault("level_evidence", level or "")
@@ -150,17 +163,18 @@ def test_job_with_no_title_and_no_role_is_dropped():
 
 def test_kept_plus_dropped_equals_input():
     jobs = [
-        make_job("Software Developer", "Developer"),
+        leveled("Junior Software Developer", level="junior"),
         make_job("Mining Engineer", "Mining Engineer"),
-        make_job("IT Support Technician", "IT Support"),
+        make_job("IT Support Technician", "IT Support",
+                 role_type=SUPPORT, job_level="junior"),
         make_job("Warehouse Assistant", ""),
     ]
     kept, excluded, counts = screen_jobs(jobs)
 
     assert len(kept) + len(excluded) == len(jobs)
     assert counts["input"] == 4
-    assert counts["kept"] == 2
-    assert counts["dropped_total"] == 2
+    assert counts["kept"] == 1
+    assert counts["dropped_total"] == 3
     assert counts["kept"] + counts["dropped_total"] == counts["input"]
 
 
@@ -198,7 +212,7 @@ def test_log_screening_runs_without_error(capsys):
     """The run log must show the drops -- that is half of F1's done-when."""
     _kept, excluded, counts = screen_jobs([
         make_job("Mining Engineer", "Mining Engineer"),
-        make_job("Software Developer", "Developer"),
+        leveled("Junior Software Developer", level="junior"),
     ])
     log_screening(counts, excluded)
 
@@ -207,19 +221,60 @@ def test_log_screening_runs_without_error(capsys):
     assert "dropped 1" in output
     assert "Mining Engineer" in output
 
+
+# ─── Scope: only software development ───────────────────────────────────────
+
+def test_a_software_job_is_on_track():
+    keep, _reason, _review = screen_off_track(leveled(level="junior"))
+    assert keep is True
+
+
+@pytest.mark.parametrize("role", [SUPPORT, QA, "DevOps/Cloud", "Security"])
+def test_other_tech_tracks_are_off_track(role):
+    """
+    Real tech jobs, and still not what CodeSpace teaches. They stay in the
+    Exclude tab so widening the scope later is a constant, not a rebuild.
+    """
+    keep, reason, _review = screen_off_track(leveled(level="junior", role_type=role))
+    assert keep is False
+    assert role in reason
+
+
+def test_a_job_with_no_role_type_is_dropped_and_flagged():
+    """
+    Unclassified is not the same as off-track: nobody decided this job was
+    the wrong kind of work, F7 just could not tell. It still does not ship,
+    but the review flag means the QA pass can measure what that costs.
+    """
+    keep, reason, review = screen_off_track(leveled(level="junior", role_type=""))
+    assert keep is False
+    assert review is True
+    assert "no role type" in reason
+
+
+def test_software_is_the_only_published_track():
+    """The scope, stated once, where a reader can find it."""
+    assert PUBLISHED_ROLE_TYPES == {SOFTWARE}
+
+
 # ─── F4: the first three years ──────────────────────────────────────────────
 
-@pytest.mark.parametrize("level", ["senior", "lead", "principal"])
+@pytest.mark.parametrize("level", ["mid", "senior", "lead", "principal"])
 def test_levels_above_the_cohort_are_dropped(level):
     keep, reason, _review = screen_above_cohort(leveled(level=level))
     assert keep is False
     assert level in reason
 
 
-@pytest.mark.parametrize("level", ["entry level", "junior", "mid", "unknown", ""])
+@pytest.mark.parametrize("level", ["entry level", "junior"])
 def test_levels_within_the_cohort_are_kept(level):
     keep, _reason, _review = screen_above_cohort(leveled(level=level))
     assert keep is True
+
+
+def test_only_two_levels_are_published():
+    """Mid is out. Emma's brief: entry level and junior software roles only."""
+    assert PUBLISHED_LEVELS == {"entry level", "junior"}
 
 
 @pytest.mark.parametrize("years,expected_keep", [
@@ -233,29 +288,37 @@ def test_levels_within_the_cohort_are_kept(level):
 ])
 def test_the_boundary_sits_at_four_years(years, expected_keep):
     """
-    Three years in is still our cohort; four is not. The brief draws the
-    line at 4+, so 3 and 4 are the two cases worth pinning down.
+    The years rule, isolated from the level rule by holding the level at
+    junior -- otherwise the level check answers first and this test would
+    pass without the years rule existing at all.
     """
-    keep, _reason, _review = screen_above_cohort(leveled(years=years))
+    keep, _reason, _review = screen_above_cohort(leveled(level="junior", years=years))
     assert keep is expected_keep
 
 
 def test_the_boundary_matches_the_named_constant():
     """If the constant moves, the rule moves with it."""
-    keep, _r, _v = screen_above_cohort(leveled(years=MAX_YEARS_FOR_COHORT - 1))
+    keep, _r, _v = screen_above_cohort(
+        leveled(level="junior", years=MAX_YEARS_FOR_COHORT - 1))
     assert keep is True
-    keep, _r, _v = screen_above_cohort(leveled(years=MAX_YEARS_FOR_COHORT))
+    keep, _r, _v = screen_above_cohort(
+        leveled(level="junior", years=MAX_YEARS_FOR_COHORT))
     assert keep is False
 
 
-def test_a_job_with_no_level_and_no_years_is_kept():
+@pytest.mark.parametrize("level", ["unknown", ""])
+def test_a_job_whose_level_is_unknown_is_dropped_and_flagged(level):
     """
-    The most important rule in F4. About a quarter of scraped jobs say
-    nothing about seniority, and those ads are usually open to anyone.
-    Dropping them would throw away exactly what this tool exists to find.
+    A reversal of the old rule, and deliberate. Unknowns used to be kept on
+    the reasoning that silence is not evidence a job is out of reach. In
+    aggregate that filled half the board with jobs nobody had leveled, which
+    is the opposite of what somebody filtering for entry level wants. The
+    drop is always flagged, because this is the one most likely to be wrong.
     """
-    keep, _reason, _review = screen_above_cohort(make_job("Software Developer", "Developer"))
-    assert keep is True
+    keep, reason, review = screen_above_cohort(leveled(level=level))
+    assert keep is False
+    assert review is True
+    assert "could not be established" in reason
 
 
 def test_the_reason_names_the_evidence():
@@ -285,13 +348,15 @@ def test_a_level_from_the_description_is_flagged():
 
 
 def test_years_read_from_the_ad_are_not_flagged():
-    _k, _r, review = screen_above_cohort(leveled(years=6, years_source="text"))
+    _k, _r, review = screen_above_cohort(
+        leveled(level="junior", years=6, years_source="text"))
     assert review is False
 
 
 def test_years_from_a_feed_are_flagged():
     """A feed's number cannot be traced back to any wording in the ad."""
-    _k, _r, review = screen_above_cohort(leveled(years=6, years_source="feed"))
+    _k, _r, review = screen_above_cohort(
+        leveled(level="junior", years=6, years_source="feed"))
     assert review is True
 
 
@@ -311,25 +376,41 @@ def test_f1_runs_before_f4():
 def test_each_screen_files_under_its_own_stage():
     _kept, excluded, _counts = screen_jobs([
         make_job("Mining Engineer", "Mining Engineer"),
+        leveled(title="Junior Test Analyst", level="junior", role_type=QA),
         leveled(title="Senior Developer", level="senior"),
     ])
     stages = [job["excluded_stage"] for job in excluded]
-    assert stages == [STAGE_NON_TECH, STAGE_ABOVE_COHORT]
+    assert stages == [STAGE_NON_TECH, STAGE_OFF_TRACK, STAGE_ABOVE_COHORT]
 
 
-def test_counts_are_split_across_both_screens():
+def test_a_senior_job_off_track_is_filed_as_off_track():
+    """
+    Order matters in the reason, not just the outcome. Scope runs before F4,
+    so a Senior QA Engineer reads as off-track: somebody might widen the
+    scope one day, and nobody is going to widen the cohort to seniors.
+    """
+    _kept, excluded, _counts = screen_jobs([
+        leveled(title="Senior QA Engineer", level="senior", role_type=QA),
+    ])
+    assert excluded[0]["excluded_stage"] == STAGE_OFF_TRACK
+
+
+def test_counts_are_split_across_all_three_screens():
     _kept, _excluded, counts = screen_jobs([
         make_job("Mining Engineer", "Mining Engineer"),      # F1 blocklist
         make_job("Operations Manager", "Operations"),        # F1 not accepted
+        leveled(title="Junior IT Support", level="junior",   # off track
+                role_type=SUPPORT),
         leveled(title="Senior Developer", level="senior"),   # F4 level
-        leveled(years=7),                                    # F4 years
+        leveled(level="junior", years=7),                    # F4 years
         leveled(level="junior"),                             # kept
     ])
     assert counts["dropped_title_blocklist"] == 1
     assert counts["dropped_role_not_accepted"] == 1
+    assert counts["dropped_off_track"] == 1
     assert counts["dropped_above_cohort"] == 2
     assert counts["kept"] == 1
-    assert counts["dropped_total"] == 4
+    assert counts["dropped_total"] == 5
     assert counts["kept"] + counts["dropped_total"] == counts["input"]
 
 
@@ -353,27 +434,31 @@ def test_every_kept_job_carries_a_needs_review_field():
 
 # ─── F4's done-when ─────────────────────────────────────────────────────────
 
-def test_nothing_above_the_cohort_survives():
+def test_only_entry_level_and_junior_software_survives():
     """
-    F4's done-when: no senior, lead or principal rows reach the sheet, and
-    no rows asking for 4+ years.
+    The done-when for the whole screen, in one list: entry level and junior
+    software roles reach the board and nothing else does -- not mid, not
+    unknown, not a junior job on another tech track.
     """
     jobs = [
         leveled(title="Senior Developer", level="senior"),
         leveled(title="Team Lead", level="lead"),
         leveled(title="Principal Engineer", level="principal"),
-        leveled(years=4),
-        leveled(years=9),
-        leveled(level="junior"),
+        leveled(title="Mid-level Developer", level="mid"),
+        leveled(level="junior", years=4),
+        leveled(level="junior", years=9),
         leveled(level="unknown"),
-        leveled(level="mid", years=3),
+        leveled(title="Junior IT Support", level="junior", role_type=SUPPORT),
+        leveled(title="Junior Software Developer", level="junior"),
+        leveled(title="Graduate Software Engineer", level="entry level"),
         make_job("Software Developer", "Developer"),
     ]
     kept, _excluded, _counts = screen_jobs(jobs)
 
-    assert len(kept) == 4
+    assert len(kept) == 2
     for job in kept:
-        assert job.get("job_level") not in {"senior", "lead", "principal"}
+        assert job["job_level"] in PUBLISHED_LEVELS
+        assert job["role_type"] in PUBLISHED_ROLE_TYPES
         years = job.get("experience_years")
         assert years is None or years < MAX_YEARS_FOR_COHORT
 
