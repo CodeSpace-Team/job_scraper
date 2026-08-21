@@ -854,3 +854,48 @@ That is the trade, stated plainly: the board is now correct and thin, where it w
 | `tests/integration/test_leveling_pipeline.py` | "Developer Level 2" pinned end to end |
 
 ---
+
+## The count said four, the board drew thirty-two
+
+### The problem
+
+The other half of Emma's report, and the half that was not about screening at all: *"The filter showed 4 matching jobs yet many cards displayed, and the first was Graduate Intern: Data Analytics."*
+
+This did not reproduce on a made-up set of jobs. It reproduced on the first try against the real board, and it turned out to be two defects stacked on each other.
+
+**Twenty-one of the 377 rows were the same advert as another row.** One Microsoft Power Platform post was on six rows, an ABAP Developer on five, an HPE ATP engineer on four — one row per day the pipeline had run.
+
+The publisher merges each day's jobs into the running `jobs.json` using F9's title/company/city key, and F9 will not match on a key it cannot trust: it needs a title **and** a company. Plenty of Indeed ads carry no company at all. Those matched nothing, every day, and were appended again on every run. The board was not accumulating jobs, it was accumulating copies.
+
+**The board keys its cards by apply link.** Twenty-one rows shared a link with another row, so twenty-one keys were repeated. React does not raise an error on repeated keys — it mis-reconciles them. On a filter change it left stale cards in the DOM. The count, which reads the filtered array directly, was telling the truth the whole time; the cards were not.
+
+Measured on the live board, before and after:
+
+| | count line | cards drawn |
+| :--- | ---: | ---: |
+| No filters | 377 of 377 | 377 |
+| Software development | 106 of 377 | **127** |
+| …and entry level | 4 of 377 | **32** |
+
+After the fix every row of that table reads 377/377, 106/106, 4/4 — and the four cards are exactly the four Emma listed in her email. The filtering was never wrong. The screen was.
+
+### What changed
+
+**The publisher matches on the apply link first**, then falls back to F9's key. Indeed's `jk` is the posting's own id, so an identical link is an identical advert and there is nothing to weigh up. F9's key still catches the same advert reached through two different links.
+
+**The board's card key no longer assumes the link is unique.** The index goes into the key, so it is unique whatever arrives. The publisher no longer creates those rows, but a key must not depend on data being clean in order to work — that dependency is what turned a data bug into a wrong number on a client's screen.
+
+### What this does not fix
+
+The twenty-one duplicate rows already on the board stay there until they age out of the 45-day window. The card key fix means they render honestly — the count and the cards agree — but the same advert still appears more than once. Clearing them is a one-off rewrite of `jobs.json`, deliberately not done as part of this change.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `src/pipeline/publish.py` | `merge` matches on the apply link before F9's key |
+| `frontend/src/App.jsx` | Card key includes the index, so repeated links cannot desync the list |
+| `tests/unit/test_publish.py` | The five-day pile-up, pinned |
+| `frontend/src/App.test.jsx` | Cards drawn must equal the count claimed |
+
+---
