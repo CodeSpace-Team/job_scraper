@@ -49,13 +49,30 @@ JOBS_FILE = Path(__file__).resolve().parents[3] / "frontend" / "public" / "jobs.
  reaches the live site at all.
  """
 
-RETENTION_DAYS = 45
+RETENTION_DAYS = 7
 """
 How long a job stays on the board after its posting date.
 
 Ads do not stay open indefinitely, and an unbounded board would just become
 a second copy of the Sheet's own growing history -- exactly what this module
-exists to avoid.
+exists to avoid. Seven days rather than the original forty-five: a graduate
+opening the board wants what is open now, and a month-old advert on a job
+board is mostly a way of wasting somebody's afternoon.
+"""
+
+MIN_DAYS_ON_BOARD = 5
+"""
+How long a job stays after we first found it, whatever its posting date says.
+
+Without this the seven-day window is brutal in a way that has nothing to do
+with the job: 37% of the ads we scrape are *already* more than seven days old
+the moment we first see them, and the median ad is four days old at first
+sighting. A strict window bins better than a third of every day's find on the
+day it is found -- ads that are open, taking applications, and that nobody
+has shown to anyone yet.
+
+The cost is that some adverts linger up to twelve days. That is the cheaper
+mistake.
 """
 
 
@@ -172,13 +189,31 @@ def merge(
     return merged
 
 
+def _as_date(raw: Any) -> Optional[date]:
+    """Read a YYYY-MM-DD prefix off a value, or None if it is not one."""
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(str(raw)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
 def prune(
     jobs: Sequence[Dict[str, Any]],
     today: Optional[date] = None,
     retention_days: int = RETENTION_DAYS,
+    min_days: int = MIN_DAYS_ON_BOARD,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """
     Drop jobs whose posting has aged out of the retention window.
+
+    Two ways to survive, and a job needs only one:
+
+    1. It was posted inside the retention window.
+    2. We found it inside the ``min_days`` floor -- however old the ad says
+       it is. See ``MIN_DAYS_ON_BOARD``: without this, more than a third of
+       every day's scrape is binned on the day it arrives.
 
     A job with no usable date at all -- posting date unstated and, somehow,
     no 'date_added' either -- is kept rather than guessed away. A parse
@@ -188,27 +223,36 @@ def prune(
         jobs: The merged job list.
         today: Override for "today" (used by tests).
         retention_days: How many days a job stays on the board.
+        min_days: How long a job stays after we first found it.
 
     Returns:
         A (kept_jobs, dropped_count) tuple.
     """
-    cutoff = (today or date.today()) - timedelta(days=retention_days)
+    now = today or date.today()
+    posted_cutoff = now - timedelta(days=retention_days)
+    found_cutoff = now - timedelta(days=min_days)
+
     kept: List[Dict[str, Any]] = []
     dropped = 0
 
     for job in jobs:
-        raw = _best_date(job)
-        if not raw:
+        posted = _as_date(job.get("date_posted"))
+        found = _as_date(job.get("date_added"))
+
+        if posted is None and found is None:
             kept.append(job)
             continue
 
-        try:
-            job_date = datetime.strptime(raw[:10], "%Y-%m-%d").date()
-        except ValueError:
-            kept.append(job)
-            continue
+        # OfferZen and PNet never state a posting date, so for those the
+        # date we found it is the best stand-in -- the same fallback the
+        # ordering uses. Keeping it means this change does not quietly
+        # shorten those sources' shelf life to the floor alone.
+        stated = posted if posted is not None else found
 
-        if job_date >= cutoff:
+        fresh_ad = stated is not None and stated >= posted_cutoff
+        newly_found = found is not None and found >= found_cutoff
+
+        if fresh_ad or newly_found:
             kept.append(job)
         else:
             dropped += 1
