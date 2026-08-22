@@ -974,3 +974,56 @@ Against 20 under the narrow rules, and one new job on the run that morning. The 
 | `frontend/src/lib/format.js` | Cleaning the scraper's marks out of an advert |
 
 ---
+
+## Ask first, then match — the board stops guessing
+
+### The problem
+
+Monde, reading the board: *"companies will just label a job as junior without proper information in the description or skills required for that job. Lets not guess, but match what the user has selected."*
+
+The numbers on a real 66-job board say the same thing:
+
+| Where the level label came from | Jobs |
+| :--- | ---: |
+| Nothing at all — no evidence | 29 |
+| A years figure read from the ad | 27 |
+| The company's own word in the title | 10 |
+
+**Forty-four percent of the board carried no evidence of its own level.** Only three jobs rested on a title word with nothing to back it — *Junior Process Developer*, *Junior Data Analyst* — but those three are the shape of the problem, and typing "Junior" into a title costs an employer nothing.
+
+Opening the board with a list of those jobs, ordered by date, is presenting labels we do not trust as though we did.
+
+### What changed
+
+**The board opens empty.** A student picks the kind of work, where they are, and the skills they already have, then presses *Search for jobs*. Nothing is shown before that. The search button is disabled until there is a track or a level to search on — skills alone would mean the whole board sorted, which is the everything-at-once screen this replaces.
+
+**Level is matched on the ad's own number, not its adjective.** Selecting *junior* means "ads asking up to three years"; *entry level* means "up to one". An ad that calls itself junior and then asks for five years does not come back from a junior search. An ad that states no number cannot be ruled out on level, so it stays in — flagged as unstated, so the student knows to read it.
+
+**Skills rank, they never filter.** Every job that passes track and level is shown; the ones sharing the most skills come first. A seven-day board holds a few dozen jobs, and if ticking React and Docker removed everything else a student would see two results or none — and a student who sees "no matches" concludes there are no jobs.
+
+**Every card says what its match rests on.** *Asks for 2 years* · *Matches 4 of your 6 skills: Python, SQL, Git, React* — or, honestly, *The ad does not say what level it wants*. Having worked around the labels, the card cannot then ask to be trusted on the same footing as them.
+
+**The level badge is gone from the card.** It was the pipeline's own guess, and it contradicted the search that found the job: a student who asked for junior work saw "Mid" stamped on the first result, directly above a line saying the ad asks for three years. The line is the true thing. Only the badge went; the level is still derived, still on the record, still what F4 screens on.
+
+### What did not change
+
+The keyword box and the sort control are still there — they moved into the results, since there is nothing to keyword-search or re-order before a search has happened. Sorting gained *Best match first* and defaults to it.
+
+`FilterPanel` is deleted rather than left unused. `SearchForm` replaces it.
+
+### How to check it is working
+
+- **Open the board.** No jobs. A prompt, a form, and a count of what is open.
+- **Search software development at junior.** On the 22 August board that returns 30 of 66, top result *Java Developer (Intermediate)* — reached because the ad says three years, not because anything called it junior.
+- **Tick a skill you do not have.** The count must not drop. If it does, skills have become a filter again.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `frontend/src/lib/match.js` | The matching rules, and the evidence each match rests on |
+| `frontend/src/components/SearchForm.jsx` | What a student tells us before any jobs are shown |
+| `frontend/src/App.jsx` | Empty until searched; keyword and sort moved into the results |
+| `frontend/src/components/JobCard.jsx` | The match note, and no level badge |
+
+---
