@@ -23,8 +23,14 @@ from src.pipeline.screening import (
     PUBLISHED_ROLE_TYPES,
     STAGE_ABOVE_COHORT,
     STAGE_NON_TECH,
+    STAGE_OFF_TRACK,
+    TIER_APPLY,
+    TIER_STRETCH,
     screen_jobs,
 )
+
+APPLY, STRETCH, OUT = TIER_APPLY, TIER_STRETCH, ""
+"""Short names, so the fixture below reads as a table rather than a wall."""
 
 # The sheets module exits at import time if gspread is missing.
 gspread = pytest.importorskip("gspread")
@@ -150,7 +156,10 @@ def test_screening_runs_before_anything_reaches_the_sheet(mixed_day):
 
     for job in kept:
         assert job["role_type"] in PUBLISHED_ROLE_TYPES
-        assert job["job_level"] in PUBLISHED_LEVELS
+        # These fixtures never went through F2, so they carry no level at
+        # all -- which is exactly the case the stretch tier exists for.
+        assert job.get("job_level", "unknown") in PUBLISHED_LEVELS
+        assert job["tier"] in (TIER_APPLY, TIER_STRETCH)
 
 
 # ─── The Exclude tab ────────────────────────────────────────────────────────
@@ -239,41 +248,42 @@ def full_ad(title, description):
 def cohort_day():
     """
     A day's tech jobs spanning the whole seniority range and several tracks,
-    written the way real ads are. Each is paired with whether it should reach
-    the board -- entry level or junior, and software development.
+    written the way real ads are. Each is paired with the tier it should land
+    in: "apply", "stretch", or "" for the ones that should not reach the board
+    at all.
 
-    The three "right level, wrong track" entries are the point of the fixture.
-    They are good jobs and a graduate could get them; they are just not what
-    CodeSpace trains people for, and before the scope screen existed they
-    were the bulk of what a student filtering for software actually saw.
+    The two entries that carry the redesign are the plain *Software Developer*
+    asking three years and the *Software Developer (Integration)* that never
+    mentions a level. Under the old two-way rule both were thrown out -- one
+    for reaching slightly past a graduate, the other for lack of proof.
     """
     return [
         (full_ad("Junior Software Developer",
-                 "0-2 years experience with React."), True),
+                 "0-2 years experience with React."), APPLY),
         (full_ad("Graduate Software Engineer",
-                 "Our graduate programme, no prior experience needed."), True),
-        (full_ad("Software Developer",
-                 "At least 3 years experience with C#."), False),      # mid
-        (full_ad("Software Developer (Integration)",
-                 "Join our team building integrations."), False),      # no level
-        (full_ad("Service Desk Agent",
-                 "Log and resolve tickets. Full training provided."), False),
+                 "Our graduate programme, no prior experience needed."), APPLY),
         (full_ad("Junior Test Analyst",
-                 "Write and run test cases. 1-2 years experience."), False),
+                 "Write and run test cases. 1-2 years experience."), APPLY),
+        (full_ad("Software Developer",
+                 "At least 3 years experience with C#."), STRETCH),
+        (full_ad("Software Developer (Integration)",
+                 "Join our team building integrations."), STRETCH),
         (full_ad("Flutter Developer",
-                 "Build apps for our clients. Modern stack."), False),
+                 "Build apps for our clients. Modern stack."), STRETCH),
+        (full_ad("Service Desk Agent",
+                 "Log and resolve tickets. Full training provided."), OUT),
         (full_ad("Senior Backend Engineer",
-                 "Minimum of 6 years building distributed systems."), False),
+                 "Minimum of 6 years building distributed systems."), OUT),
         (full_ad("Snr .NET Developer",
-                 "Design and build enterprise applications."), False),
+                 "Design and build enterprise applications."), OUT),
         (full_ad("Technical Lead - SOC Cyber Defense",
-                 "Lead our security operations centre."), False),
+                 "Lead our security operations centre."), OUT),
         (full_ad("Principal Engineer",
-                 "Set technical direction across the group."), False),
+                 "Set technical direction across the group."), OUT),
         (full_ad("DevOps Engineer",
-                 "Minimum 4 years experience with Kubernetes."), False),
+                 "Minimum 4 years experience with Kubernetes."), OUT),
         (full_ad("Cloud Engineer",
-                 "You will have 5+ years experience with AWS."), False),
+                 "You will have 5+ years experience with AWS."), OUT),
     ]
 
 
@@ -287,17 +297,19 @@ def screened(cohort_day):
     return screen_jobs(jobs)
 
 
-def test_only_reachable_jobs_survive(cohort_day, screened):
+def test_every_ad_lands_in_the_tier_it_should(cohort_day, screened):
     """The done-when, on real ads rather than hand-set fields."""
     kept, _excluded, _counts = screened
-    kept_titles = {job["title"] for job in kept}
+    tiers = {job["title"]: job["tier"] for job in kept}
 
     wrong = []
-    for job, reachable in cohort_day:
-        if reachable and job["title"] not in kept_titles:
-            wrong.append(f"wrongly dropped: {job['title']}")
-        if not reachable and job["title"] in kept_titles:
-            wrong.append(f"wrongly kept: {job['title']}")
+    for job, expected in cohort_day:
+        actual = tiers.get(job["title"], OUT)
+        if actual != expected:
+            wrong.append(
+                f"{job['title']}: expected {expected or 'off the board'}, "
+                f"got {actual or 'off the board'}"
+            )
 
     assert wrong == [], "\n".join(wrong)
 
@@ -315,29 +327,40 @@ def test_no_job_asking_four_or_more_years_reaches_the_sheet(screened):
         assert years is None or years < MAX_YEARS_FOR_COHORT
 
 
-def test_an_ad_that_says_nothing_about_level_is_dropped_and_flagged(screened):
+def test_an_ad_that_says_nothing_about_level_is_a_stretch_and_is_flagged(screened):
     """
     The reversal, on a real ad. "Software Developer (Integration)" is on the
-    right track and might well be a graduate job -- but nothing in it says
-    so, and a board that cannot tell should not be claiming entry level. The
-    review flag is what stops that being a silent loss.
+    right track and might well be a graduate job -- nothing in it says either
+    way. It used to be dropped for lack of proof. It now ships, labelled a
+    stretch rather than claimed as entry level, and flagged for the QA pass.
+    """
+    kept, _excluded, _counts = screened
+
+    job = next(j for j in kept if j["title"] == "Software Developer (Integration)")
+    assert job["tier"] == TIER_STRETCH
+    assert job["needs_review"] is True
+    assert "could not be established" in job["tier_reason"]
+
+
+def test_an_ad_asking_three_years_is_a_stretch_not_a_drop(screened):
+    """A developer two years in meets the requirements and applies anyway."""
+    kept, _excluded, _counts = screened
+
+    job = next(j for j in kept if j["title"] == "Software Developer")
+    assert job["tier"] == TIER_STRETCH
+    assert job["experience_years"] == 3
+
+
+def test_an_off_track_job_still_does_not_reach_the_sheet(screened):
+    """
+    Widening the tiers is not widening the scope. A service desk agent is a
+    perfectly good junior job and still not where this course leads.
     """
     kept, excluded, _counts = screened
-    assert "Software Developer (Integration)" not in {j["title"] for j in kept}
+    assert "Service Desk Agent" not in {job["title"] for job in kept}
 
-    dropped = next(
-        j for j in excluded if j["title"] == "Software Developer (Integration)")
-    assert dropped["excluded_stage"] == STAGE_ABOVE_COHORT
-    assert dropped["needs_review"] is True
-
-
-def test_a_junior_job_on_another_track_does_not_reach_the_sheet(screened):
-    """Right level, wrong track. This is what Emma's filter test surfaced."""
-    kept, _excluded, _counts = screened
-    titles = {job["title"] for job in kept}
-    assert "Junior Test Analyst" not in titles
-    assert "Service Desk Agent" not in titles
-    assert "Flutter Developer" not in titles
+    dropped = next(j for j in excluded if j["title"] == "Service Desk Agent")
+    assert dropped["excluded_stage"] == STAGE_OFF_TRACK
 
 
 def test_every_f4_drop_explains_itself(screened):

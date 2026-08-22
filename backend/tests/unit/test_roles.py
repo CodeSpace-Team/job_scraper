@@ -18,6 +18,7 @@ from datetime import date
 
 from src.pipeline.roles import (
     BUSINESS_ANALYSIS,
+    DATA,
     DEVOPS,
     MOBILE,
     QA,
@@ -47,10 +48,50 @@ def make_job(title="", description="", search_term="", primary_role=None):
 
 # ─── The fixed role list ─────────────────────────────────────────────────────
 
-def test_there_are_exactly_seven_tracks():
-    """The brief's appendix fixes this at seven -- never free text."""
-    assert len(ROLE_TYPES) == 7
-    assert len(set(ROLE_TYPES)) == 7
+def test_the_track_list_is_fixed_and_has_no_duplicates():
+    """
+    Eight now, not the brief's original seven. Data & BI was added after
+    measuring what the seven were doing to real jobs: 24 of the 29 data jobs
+    on the live board came out of here with no track at all, which the scope
+    screen reads as "not our kind of work". A graduate who can write SQL is a
+    plausible candidate for those, so the taxonomy was wrong, not the jobs.
+    """
+    assert len(ROLE_TYPES) == 8
+    assert len(set(ROLE_TYPES)) == 8
+    assert DATA in ROLE_TYPES
+
+
+# ─── Data & BI, the eighth track ────────────────────────────────────────────
+
+@pytest.mark.parametrize("title", [
+    "Junior Data Analyst",
+    "Data Analyst",
+    "Graduate Data Analyst (AI and Analytics)",
+    "Data Engineer",
+    "Data Scientist",
+    "Reporting Analyst",
+    "ETL Developer",
+])
+def test_data_jobs_get_the_data_track(title):
+    role, source = classify_role(title, "")
+    assert role == DATA
+    assert source == "title"
+
+
+def test_power_bi_stays_with_low_code():
+    """
+    Power BI and Business Intelligence Developer are reporting work on the
+    low-code tooling, and Business Analysis claims them first. Both tracks
+    are published, so this decides which filter a student finds it under,
+    not whether it appears.
+    """
+    assert classify_role("Power BI Developer", "")[0] == BUSINESS_ANALYSIS
+    assert classify_role("Business Intelligence Developer", "")[0] == BUSINESS_ANALYSIS
+
+
+def test_a_data_capture_clerk_is_not_a_data_job():
+    """"Data" on its own is not a track -- the role word has to be there."""
+    assert classify_role("Data Capture Clerk", "")[0] == ""
 
 
 # ─── Titles are read correctly, including the traps ─────────────────────────

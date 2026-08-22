@@ -11,11 +11,13 @@ Covers the three things F1 has to get right:
 
 import pytest
 
-from src.pipeline.roles import QA, SOFTWARE, SUPPORT
+from src.pipeline.roles import BUSINESS_ANALYSIS, DATA, MOBILE, QA, SOFTWARE, SUPPORT
 from src.pipeline.screening import (
     MAX_YEARS_FOR_COHORT,
     PUBLISHED_LEVELS,
     PUBLISHED_ROLE_TYPES,
+    TIER_APPLY,
+    TIER_STRETCH,
     STAGE_ABOVE_COHORT,
     STAGE_NON_TECH,
     STAGE_OFF_TRACK,
@@ -222,18 +224,20 @@ def test_log_screening_runs_without_error(capsys):
     assert "Mining Engineer" in output
 
 
-# ─── Scope: only software development ───────────────────────────────────────
+# ─── Scope: the tracks this course leads to ─────────────────────────────────
 
-def test_a_software_job_is_on_track():
-    keep, _reason, _review = screen_off_track(leveled(level="junior"))
+@pytest.mark.parametrize("role", [SOFTWARE, MOBILE, QA, BUSINESS_ANALYSIS, DATA])
+def test_the_published_tracks_are_on_track(role):
+    keep, _reason, _review = screen_off_track(leveled(level="junior", role_type=role))
     assert keep is True
 
 
-@pytest.mark.parametrize("role", [SUPPORT, QA, "DevOps/Cloud", "Security"])
-def test_other_tech_tracks_are_off_track(role):
+@pytest.mark.parametrize("role", [SUPPORT, "DevOps/Cloud", "Security"])
+def test_the_other_tech_tracks_are_off_track(role):
     """
-    Real tech jobs, and still not what CodeSpace teaches. They stay in the
-    Exclude tab so widening the scope later is a constant, not a rebuild.
+    Real tech jobs, and still not where this course leads -- a service desk
+    leads to infrastructure, not development. They stay on the Exclude tab so
+    widening the scope later is a name in a set, not a rebuild.
     """
     keep, reason, _review = screen_off_track(leveled(level="junior", role_type=role))
     assert keep is False
@@ -252,73 +256,97 @@ def test_a_job_with_no_role_type_is_dropped_and_flagged():
     assert "no role type" in reason
 
 
-def test_software_is_the_only_published_track():
-    """The scope, stated once, where a reader can find it."""
-    assert PUBLISHED_ROLE_TYPES == {SOFTWARE}
+def test_the_published_tracks_are_stated_in_one_place():
+    """Core plus adjacent. Support, security and DevOps are deliberately out."""
+    assert PUBLISHED_ROLE_TYPES == {SOFTWARE, MOBILE, QA, BUSINESS_ANALYSIS, DATA}
+    assert SUPPORT not in PUBLISHED_ROLE_TYPES
 
 
-# ─── F4: the first three years ──────────────────────────────────────────────
+# ─── F4: apply, stretch, or out of reach ────────────────────────────────────
 
-@pytest.mark.parametrize("level", ["mid", "senior", "lead", "principal"])
-def test_levels_above_the_cohort_are_dropped(level):
-    keep, reason, _review = screen_above_cohort(leveled(level=level))
-    assert keep is False
-    assert level in reason
-
-
-@pytest.mark.parametrize("level", ["entry level", "junior"])
-def test_levels_within_the_cohort_are_kept(level):
-    keep, _reason, _review = screen_above_cohort(leveled(level=level))
-    assert keep is True
-
-
-def test_only_two_levels_are_published():
-    """Mid is out. Emma's brief: entry level and junior software roles only."""
-    assert PUBLISHED_LEVELS == {"entry level", "junior"}
-
-
-@pytest.mark.parametrize("years,expected_keep", [
-    (0, True),
-    (1, True),
-    (2, True),
-    (3, True),
-    (4, False),
-    (5, False),
-    (12, False),
+@pytest.mark.parametrize("level,years,expected", [
+    # Clearly in reach.
+    ("entry level", None, TIER_APPLY),
+    ("entry level", 0,    TIER_APPLY),
+    ("junior",      None, TIER_APPLY),
+    ("junior",      2,    TIER_APPLY),
+    # Reaching slightly past a graduate.
+    ("junior",      3,    TIER_STRETCH),
+    ("mid",         3,    TIER_STRETCH),
+    ("mid",         None, TIER_STRETCH),
+    ("unknown",     None, TIER_STRETCH),
+    ("",            None, TIER_STRETCH),
+    # Out of reach.
+    ("junior",      4,    ""),
+    ("mid",         5,    ""),
+    ("senior",      None, ""),
+    ("lead",        None, ""),
+    ("principal",   None, ""),
 ])
-def test_the_boundary_sits_at_four_years(years, expected_keep):
-    """
-    The years rule, isolated from the level rule by holding the level at
-    junior -- otherwise the level check answers first and this test would
-    pass without the years rule existing at all.
-    """
-    keep, _reason, _review = screen_above_cohort(leveled(level="junior", years=years))
-    assert keep is expected_keep
+def test_the_tier_a_job_lands_in(level, years, expected):
+    tier, _reason, _review = screen_above_cohort(leveled(level=level, years=years))
+    assert tier == expected
 
 
-def test_the_boundary_matches_the_named_constant():
-    """If the constant moves, the rule moves with it."""
-    keep, _r, _v = screen_above_cohort(
-        leveled(level="junior", years=MAX_YEARS_FOR_COHORT - 1))
-    assert keep is True
-    keep, _r, _v = screen_above_cohort(
-        leveled(level="junior", years=MAX_YEARS_FOR_COHORT))
-    assert keep is False
+def test_three_years_is_a_stretch_not_a_rejection():
+    """
+    The decision this tier exists for. A developer two years in reads
+    "3 years required", checks the requirements listed underneath, meets
+    them, and applies -- employers write the years line as a filter and then
+    hire on the requirements. Twenty-eight software jobs on the live board
+    asked for exactly three years.
+    """
+    tier, reason, _review = screen_above_cohort(leveled(level="mid", years=3))
+    assert tier == TIER_STRETCH
+    assert "3 years" in reason
 
 
 @pytest.mark.parametrize("level", ["unknown", ""])
-def test_a_job_whose_level_is_unknown_is_dropped_and_flagged(level):
+def test_a_job_with_no_level_is_a_stretch_and_is_flagged(level):
     """
-    A reversal of the old rule, and deliberate. Unknowns used to be kept on
-    the reasoning that silence is not evidence a job is out of reach. In
-    aggregate that filled half the board with jobs nobody had leveled, which
-    is the opposite of what somebody filtering for entry level wants. The
-    drop is always flagged, because this is the one most likely to be wrong.
+    The reversal that gave the board 31 software jobs back. An ad that says
+    nothing about level -- *Full Stack Developer*, *Software Engineer –
+    GoLang* -- was being thrown out for lack of proof, never for evidence
+    against. It now ships, labelled a stretch, and flagged so the QA pass can
+    see what we put in front of people without being sure.
     """
-    keep, reason, review = screen_above_cohort(leveled(level=level))
-    assert keep is False
+    tier, reason, review = screen_above_cohort(leveled(level=level))
+    assert tier == TIER_STRETCH
     assert review is True
     assert "could not be established" in reason
+
+
+def test_the_years_gate_does_not_move():
+    """Four years is out whatever the level says, and matches the constant."""
+    tier, _r, _v = screen_above_cohort(
+        leveled(level="junior", years=MAX_YEARS_FOR_COHORT - 1))
+    assert tier == TIER_STRETCH
+    tier, reason, _v = screen_above_cohort(
+        leveled(level="junior", years=MAX_YEARS_FOR_COHORT))
+    assert tier == ""
+    assert "years" in reason
+
+
+@pytest.mark.parametrize("title", [
+    "Senior Software Developer",
+    "Snr Developer",
+    "Lead Developer",
+    "Principal Engineer",
+    "Head of Engineering",
+    "Development Manager",
+    "Solutions Architect",
+])
+def test_a_senior_title_is_out_whatever_the_level_field_says(title):
+    """
+    Deliberately redundant with F2, which would normally have set the level
+    to senior or lead off the same words. It is here because F2's rules are
+    allowed to change, and a change there must not be able to quietly promote
+    a Senior Developer into the stretch tier.
+    """
+    tier, reason, _review = screen_above_cohort(
+        leveled(title=title, level="unknown"))
+    assert tier == ""
+    assert "title says" in reason
 
 
 def test_the_reason_names_the_evidence():
@@ -376,7 +404,8 @@ def test_f1_runs_before_f4():
 def test_each_screen_files_under_its_own_stage():
     _kept, excluded, _counts = screen_jobs([
         make_job("Mining Engineer", "Mining Engineer"),
-        leveled(title="Junior Test Analyst", level="junior", role_type=QA),
+        leveled(title="Junior Service Desk Analyst", level="junior",
+                role_type=SUPPORT),
         leveled(title="Senior Developer", level="senior"),
     ])
     stages = [job["excluded_stage"] for job in excluded]
@@ -386,11 +415,12 @@ def test_each_screen_files_under_its_own_stage():
 def test_a_senior_job_off_track_is_filed_as_off_track():
     """
     Order matters in the reason, not just the outcome. Scope runs before F4,
-    so a Senior QA Engineer reads as off-track: somebody might widen the
+    so a Senior Support Engineer reads as off-track: somebody might widen the
     scope one day, and nobody is going to widen the cohort to seniors.
     """
     _kept, excluded, _counts = screen_jobs([
-        leveled(title="Senior QA Engineer", level="senior", role_type=QA),
+        leveled(title="Senior Support Engineer", level="senior",
+                role_type=SUPPORT),
     ])
     assert excluded[0]["excluded_stage"] == STAGE_OFF_TRACK
 
@@ -434,33 +464,56 @@ def test_every_kept_job_carries_a_needs_review_field():
 
 # ─── F4's done-when ─────────────────────────────────────────────────────────
 
-def test_only_entry_level_and_junior_software_survives():
+def test_the_whole_screen_on_one_realistic_batch():
     """
-    The done-when for the whole screen, in one list: entry level and junior
-    software roles reach the board and nothing else does -- not mid, not
-    unknown, not a junior job on another tech track.
+    The done-when, in one list. Two reach the board as apply, three as a
+    stretch, and the rest do not reach it at all.
     """
     jobs = [
+        # Out of reach.
         leveled(title="Senior Developer", level="senior"),
         leveled(title="Team Lead", level="lead"),
         leveled(title="Principal Engineer", level="principal"),
-        leveled(title="Mid-level Developer", level="mid"),
         leveled(level="junior", years=4),
         leveled(level="junior", years=9),
-        leveled(level="unknown"),
+        # Off track.
         leveled(title="Junior IT Support", level="junior", role_type=SUPPORT),
+        # A stretch.
+        leveled(title="Mid-level Developer", level="mid"),
+        leveled(title="Full Stack Developer", level="unknown"),
+        leveled(title="Junior Data Analyst", level="junior", years=3,
+                role_type=DATA),
+        # Straightforwardly in reach.
         leveled(title="Junior Software Developer", level="junior"),
         leveled(title="Graduate Software Engineer", level="entry level"),
-        make_job("Software Developer", "Developer"),
     ]
-    kept, _excluded, _counts = screen_jobs(jobs)
+    kept, _excluded, counts = screen_jobs(jobs)
 
-    assert len(kept) == 2
+    assert counts["kept_apply"] == 2
+    assert counts["kept_stretch"] == 3
+    assert len(kept) == 5
+
     for job in kept:
+        assert job["tier"] in (TIER_APPLY, TIER_STRETCH)
         assert job["job_level"] in PUBLISHED_LEVELS
         assert job["role_type"] in PUBLISHED_ROLE_TYPES
         years = job.get("experience_years")
         assert years is None or years < MAX_YEARS_FOR_COHORT
+
+
+def test_every_kept_job_says_which_tier_it_is_in():
+    """The board reads this field on every card it draws."""
+    kept, _excluded, _counts = screen_jobs([
+        leveled(title="Junior Software Developer", level="junior"),
+        leveled(title="Full Stack Developer", level="unknown"),
+    ])
+
+    tiers = {job["title"]: job["tier"] for job in kept}
+    assert tiers["Junior Software Developer"] == TIER_APPLY
+    assert tiers["Full Stack Developer"] == TIER_STRETCH
+
+    stretch = next(j for j in kept if j["tier"] == TIER_STRETCH)
+    assert stretch["tier_reason"], "a stretch has to say why it is one"
 
 
 def test_log_reports_both_screens(capsys):

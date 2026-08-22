@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { formatDate, formatJobDate, formatLevel, formatSalary, formatYears } from './format.js'
+import {
+  cleanDescription,
+  descriptionSegments,
+  formatDate,
+  formatJobDate,
+  formatLevel,
+  formatSalary,
+  formatYears,
+} from './format.js'
 
 describe('formatSalary', () => {
   it('formats a full range', () => {
@@ -88,5 +96,57 @@ describe('formatJobDate', () => {
 
   it('returns null when neither date is present', () => {
     expect(formatJobDate({})).toBeNull()
+  })
+})
+describe('cleanDescription', () => {
+  it('takes out the backslash escapes the scraper leaves behind', () => {
+    expect(cleanDescription('Process Investigation \\& Gap Analysis'))
+      .toBe('Process Investigation & Gap Analysis')
+  })
+
+  it('normalises a triple-asterisk heading to a plain bold one', () => {
+    expect(cleanDescription('***Job title*** Junior Developer'))
+      .toBe('**Job title** Junior Developer')
+  })
+
+  it('is safe on nothing at all', () => {
+    expect(cleanDescription(null)).toBe('')
+    expect(cleanDescription(undefined)).toBe('')
+  })
+})
+
+describe('descriptionSegments', () => {
+  it('turns the ad\'s own ** markers into bold runs', () => {
+    expect(descriptionSegments('**Requirements** Two years of React.')).toEqual([
+      { text: 'Requirements', bold: true },
+      { text: ' Two years of React.', bold: false },
+    ])
+  })
+
+  it('handles several headings in one advert', () => {
+    const segments = descriptionSegments('**Role** Build things. **Pay** R15 000.')
+    expect(segments.filter((s) => s.bold).map((s) => s.text)).toEqual(['Role', 'Pay'])
+  })
+
+  it('spans a heading that runs over a line break', () => {
+    expect(descriptionSegments('**Job\ndescription** text')[0])
+      .toEqual({ text: 'Job\ndescription', bold: true })
+  })
+
+  it('leaves an advert with no markers as a single plain run', () => {
+    expect(descriptionSegments('Just plain text.')).toEqual([
+      { text: 'Just plain text.', bold: false },
+    ])
+  })
+
+  it('loses nothing -- every character of the advert comes back', () => {
+    const ad = '**Role** Build things \\& ship them. **Pay** R15 000.'
+    const rejoined = descriptionSegments(ad).map((s) => s.text).join('')
+    expect(rejoined).toBe('Role Build things & ship them. Pay R15 000.')
+  })
+
+  it('is safe on nothing at all', () => {
+    expect(descriptionSegments('')).toEqual([])
+    expect(descriptionSegments(null)).toEqual([])
   })
 })

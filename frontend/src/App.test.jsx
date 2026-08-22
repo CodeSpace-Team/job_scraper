@@ -152,4 +152,49 @@ describe('App', () => {
     expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(1)
     expect(screen.getByText('Junior React Developer')).toBeInTheDocument()
   })
+  it('shows the advert on demand, so nobody clicks Apply to find out what the job wants', async () => {
+    /*
+     * A student with only the one-line blurb has to open the employer's site
+     * to learn what the job actually asks for -- and finds out there that it
+     * wanted five years. The description was already on the card; it just
+     * was not shown.
+     */
+    const user = userEvent.setup()
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            jobs: [{
+              ...SAMPLE_JOBS[0],
+              description_snippet:
+                'We are looking for a junior developer.\n\nYou will need React and a willingness to learn.',
+            }],
+          }),
+      }),
+    )
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('1 of 1 jobs')).toBeInTheDocument())
+
+    expect(screen.queryByText(/willingness to learn/)).not.toBeInTheDocument()
+
+    const toggle = screen.getByRole('button', { name: 'View description' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(toggle)
+
+    expect(screen.getByText(/willingness to learn/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide description' }))
+      .toHaveAttribute('aria-expanded', 'true')
+
+    await user.click(screen.getByRole('button', { name: 'Hide description' }))
+    expect(screen.queryByText(/willingness to learn/)).not.toBeInTheDocument()
+  })
+
+  it('offers no description button when the job has no description', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'View description' })).not.toBeInTheDocument()
+  })
 })

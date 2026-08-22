@@ -19,6 +19,7 @@ from datetime import date, timedelta
 import pytest
 
 from src.pipeline.publish import (
+    MIN_DAYS_ON_BOARD,
     RETENTION_DAYS,
     load_existing,
     log_publish,
@@ -206,11 +207,66 @@ def test_the_retention_boundary_is_exact():
 def test_date_posted_is_preferred_over_date_added():
     """A job re-scraped long after it first appeared should prune off the
     date the ad itself states, not the date this module first saw it."""
-    stale = date(2026, 8, 15) - timedelta(days=RETENTION_DAYS + 10)
-    jobs = [make_job(date_posted=stale.isoformat(), date_added="2026-08-14")]
-    kept, dropped = prune(jobs, today=date(2026, 8, 15))
+    today = date(2026, 8, 15)
+    stale = today - timedelta(days=RETENTION_DAYS + 10)
+    # date_added is outside the floor too, so this tests the posting date
+    # and nothing else.
+    old_find = today - timedelta(days=MIN_DAYS_ON_BOARD + 3)
+    jobs = [make_job(date_posted=stale.isoformat(), date_added=old_find.isoformat())]
+    kept, dropped = prune(jobs, today=today)
     assert kept == []
     assert dropped == 1
+
+
+# ─── The floor: a fresh find with an old posting date ───────────────────────
+
+def test_a_job_we_only_just_found_survives_an_old_posting_date():
+    """
+    37% of the ads we scrape are already older than the window when we first
+    see them, and the median is four days old at first sighting. Without the
+    floor, more than a third of every day's find is binned on the day it
+    arrives -- ads that are open and that nobody has been shown yet.
+    """
+    today = date(2026, 8, 15)
+    stale = today - timedelta(days=RETENTION_DAYS + 5)
+    jobs = [make_job(date_posted=stale.isoformat(), date_added=today.isoformat())]
+
+    kept, dropped = prune(jobs, today=today)
+
+    assert len(kept) == 1
+    assert dropped == 0
+
+
+def test_the_floor_runs_out_eventually():
+    """It buys a job five days, not a permanent exemption."""
+    today = date(2026, 8, 15)
+    stale = (today - timedelta(days=RETENTION_DAYS + 5)).isoformat()
+    found = (today - timedelta(days=MIN_DAYS_ON_BOARD + 1)).isoformat()
+
+    kept, dropped = prune([make_job(date_posted=stale, date_added=found)], today=today)
+
+    assert kept == []
+    assert dropped == 1
+
+
+def test_a_fresh_posting_survives_however_long_ago_we_found_it():
+    """The two rules are an either/or, not an and."""
+    today = date(2026, 8, 15)
+    jobs = [make_job(
+        date_posted=(today - timedelta(days=1)).isoformat(),
+        date_added=(today - timedelta(days=MIN_DAYS_ON_BOARD + 10)).isoformat(),
+    )]
+
+    kept, dropped = prune(jobs, today=today)
+
+    assert len(kept) == 1
+    assert dropped == 0
+
+
+def test_the_window_is_seven_days():
+    """The board shows what is open now, not a month of history."""
+    assert RETENTION_DAYS == 7
+    assert MIN_DAYS_ON_BOARD == 5
 
 
 def test_date_added_is_used_when_the_ad_states_no_posting_date():
