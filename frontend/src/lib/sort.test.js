@@ -6,12 +6,29 @@ function makeJob(overrides = {}) {
 }
 
 describe('sortJobs', () => {
-  it('sorts newest first by default', () => {
+  it('sorts newest first when asked', () => {
     const jobs = [
       makeJob({ title: 'Older', date_posted: '2026-08-01' }),
       makeJob({ title: 'Newer', date_posted: '2026-08-14' }),
     ]
-    expect(sortJobs(jobs).map((j) => j.title)).toEqual(['Newer', 'Older'])
+    expect(sortJobs(jobs, 'newest').map((j) => j.title)).toEqual(['Newer', 'Older'])
+  })
+
+  it('leaves best-match order alone, because matchJobs already set it', () => {
+    // The default now. The list is answering a question the student asked,
+    // and the ranking that answered it is the order worth keeping.
+    const jobs = [
+      makeJob({ title: 'Older', date_posted: '2026-08-01' }),
+      makeJob({ title: 'Newer', date_posted: '2026-08-14' }),
+    ]
+    expect(sortJobs(jobs).map((j) => j.title)).toEqual(['Older', 'Newer'])
+    expect(sortJobs(jobs, 'match').map((j) => j.title)).toEqual(['Older', 'Newer'])
+  })
+
+  it('does not mutate the list it was handed', () => {
+    const jobs = [makeJob({ title: 'A' }), makeJob({ title: 'B' })]
+    sortJobs(jobs, 'match')
+    expect(jobs.map((j) => j.title)).toEqual(['A', 'B'])
   })
 
   it('sorts oldest first when asked', () => {

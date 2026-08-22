@@ -3,7 +3,6 @@ import { jobSkills, splitSkills } from '../lib/filters.js'
 import {
   descriptionSegments,
   formatJobDate,
-  formatLevel,
   formatSalary,
   formatYears,
 } from '../lib/format.js'
@@ -24,8 +23,47 @@ function SkillChip({ children }) {
   )
 }
 
-export default function JobCard({ job }) {
-  const level = formatLevel(job.job_level)
+/**
+ * What this job's match rests on, said out loud.
+ *
+ * The reason the board asks before it shows anything is that its labels are
+ * not worth presenting on their own -- 44% of jobs carry no evidence of
+ * their own level, and "Junior" in a title costs an employer nothing. Having
+ * matched on the ad's own number where there is one, the card has to say
+ * which of those it was, or it is asking to be trusted on the same footing
+ * as the labels it just worked around.
+ */
+function MatchNote({ match, pickedSkills }) {
+  if (!match) return null
+
+  const level = {
+    years: match.years === 0
+      ? 'Asks for no prior experience'
+      : `Asks for ${match.years} ${match.years === 1 ? 'year' : 'years'}`,
+    'title-only': 'Titled for this level — the ad gives no other detail',
+    unstated: 'The ad does not say what level it wants',
+  }[match.evidence]
+
+  const solid = match.evidence === 'years'
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      <span className={solid ? 'font-medium text-codespace-tealDark' : 'text-neutral-500'}>
+        {level}
+      </span>
+      {pickedSkills > 0 && (
+        <span className="text-neutral-600">
+          Matches {match.overlap.length} of your {pickedSkills} skills
+          {match.overlap.length > 0 && (
+            <span className="text-neutral-500">: {match.overlap.join(', ')}</span>
+          )}
+        </span>
+      )}
+    </div>
+  )
+}
+
+export default function JobCard({ job, match = null, pickedSkills = 0 }) {
   const years = formatYears(job.experience_years)
   const salary = formatSalary(job)
   const jobDate = formatJobDate(job)
@@ -88,9 +126,16 @@ export default function JobCard({ job }) {
         </div>
       </div>
 
+      {/*
+        No level badge. It used to sit here, and it was the pipeline's own
+        guess -- on a real board 44% of jobs have no evidence for it at all.
+        Worse, it contradicted the search that found the job: a student who
+        asked for junior work saw "Mid" stamped on the first result, above a
+        line saying the ad asks for three years. The line is the true thing;
+        the badge was the guess. Only the badge went.
+      */}
       <div className="mt-3 flex flex-wrap gap-1.5">
         {job.role_type && <Badge>{job.role_type}</Badge>}
-        {level && <Badge>{level}</Badge>}
         {job.workplace_policy && <Badge>{job.workplace_policy}</Badge>}
         {job.location && <Badge>{job.location}</Badge>}
       </div>
@@ -100,6 +145,8 @@ export default function JobCard({ job }) {
           {[years, salary].filter(Boolean).join(' · ')}
         </p>
       )}
+
+      <MatchNote match={match} pickedSkills={pickedSkills} />
 
       {job.blurb && <p className="mt-3 text-sm text-neutral-700">{job.blurb}</p>}
 

@@ -8,12 +8,19 @@
  */
 
 export const SORT_OPTIONS = [
+  { value: 'match', label: 'Best match first' },
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first' },
   { value: 'years-asc', label: 'Fewest years required first' },
 ]
 
-export const DEFAULT_SORT = 'newest'
+export const DEFAULT_SORT = 'match'
+/**
+ * Best match is the default, because the list is now answering a question
+ * the student asked rather than being a feed. 'match' is deliberately not
+ * handled below: matchJobs has already put the results in that order, so
+ * sorting by it means leaving them alone.
+ */
 
 function sortDate(job) {
   return job.date_posted || job.date_added || ''
@@ -47,6 +54,7 @@ function byYearsAscending(a, b) {
 export function sortJobs(jobs, sortBy = DEFAULT_SORT) {
   const sorted = [...jobs]
 
+  if (sortBy === 'match') return sorted
   if (sortBy === 'oldest') return sorted.sort(byDate)
   if (sortBy === 'years-asc') return sorted.sort(byYearsAscending)
   return sorted.sort((a, b) => byDate(b, a))
