@@ -899,3 +899,78 @@ The twenty-one duplicate rows already on the board stay there until they age out
 | `frontend/src/App.test.jsx` | Cards drawn must equal the count claimed |
 
 ---
+
+## Apply or stretch — what a junior can actually take
+
+### The problem
+
+The narrow rules worked, and that was the problem. The first live run under them added **one job**. Reading the Exclude tab showed what they were throwing away: *Junior Data Analyst*, *Full Stack Developer*, *Software Engineer – GoLang* — jobs a CodeSpace graduate could plausibly get, dropped for reasons that did not survive a second look.
+
+Three of them, from Monde's own read of the tab:
+
+**Ads that ask for a related qualification.** "BSc Computer Science or related" is something a CodeSpace graduate *satisfies*. Reading it as a barrier is backwards.
+
+**Ads that name a stack.** Docker, Kubernetes, Go, Shopify. A junior learns these, and AI has collapsed how long that takes. Most companies now write AI skills into the ad themselves.
+
+**Ads that ask for three years.** A developer two years in reads that line, checks the requirements listed underneath, meets them, and applies. Employers write the years line as a filter and hire on the requirements.
+
+### The principle
+
+**Gate on what the ad demands, not on what it is called.** The old design asked two label questions — is this software, is this junior — and labels are exactly what had been going wrong all week. The question that matters is whether somebody three years out of CodeSpace could get the job.
+
+That splits requirements in two. Real gates: four or more years, senior/lead/principal in the title, credentials outside the field, a clearance. Not gates: the stack named, the qualification asked for, silence about level, or the word "Intermediate".
+
+### Three tiers instead of keep-or-drop
+
+| Tier | Rule |
+| :--- | :--- |
+| **apply** | On track, entry level or junior, asking two years or fewer |
+| **stretch** | On track, mid asking three years or fewer — or no level established at all |
+| neither | Four or more years, or senior/lead/principal in any form |
+
+Every kept job carries `tier` and `tier_reason`. The gate that does not move is seniority.
+
+**The stretch tier is the whole redesign.** Under the two-way rule the board dropped 31 software jobs whose ads never mentioned a level — thrown out for lack of proof rather than for evidence against — and 28 more asking for exactly three years.
+
+### Scope: five tracks, not one
+
+Core is software development and mobile. Adjacent and also published: **Data & BI**, QA/testing, and low-code — jobs a graduate who can build things plausibly takes first. Out: technical support, security, DevOps. All genuinely technical, none of them where this course leads; a service desk leads to infrastructure, not development.
+
+**Data & BI did not exist as a track.** The taxonomy had seven types from the brief and none of them was data, which is why *Junior Data Analyst* and *Graduate Data Analyst (AI and Analytics)* came out of F7 with no track at all — and the scope screen reads no track as "not our kind of work". 24 of the 29 data jobs on the live board had no role type. The taxonomy was wrong, not the jobs. It is the eighth now.
+
+### Freshness: 7 days, floored at 5
+
+The window drops from 45 days to 7 — a graduate wants what is open now, and a month-old advert on a job board mostly wastes an afternoon.
+
+But **never sooner than five days after we first found it**, and that floor is not a nicety. 37% of the ads we scrape are *already* more than seven days old the moment we first see them; the median is four days old at first sighting. A strict window bins better than a third of every day's find on the day it arrives — ads that are open, taking applications, and that nobody has been shown yet. The cost is that some adverts linger up to twelve days. That is the cheaper mistake.
+
+### Read the ad before opening it
+
+The card gained a **View description** button next to Apply. Without it a student had the one-line blurb and nothing else, so the only way to learn what a job actually asked for was to click Apply, land on the employer's site, and discover there that it wanted five years.
+
+The description was already on the card — 3000 characters of it, on 369 of 378 jobs — it simply was not being shown.
+
+It needed cleaning first. 350 of 378 adverts use markdown `**` to mark their section headings and about half carry backslash escapes the source site left in, so shown raw an ad opens with `***Job title*** ... \& Gap Analysis`. Those markers are the ad's own structure, so they are rendered as real headings rather than stripped. Rendered as text segments, never as HTML: the text is scraped, and `dangerouslySetInnerHTML` would put whatever an employer typed straight into the page.
+
+### What it does to the board
+
+Run over the live board of 22 August, 378 jobs:
+
+| | Jobs |
+| :--- | ---: |
+| Passing the tiers | 154 — 45 apply, 109 stretch |
+| **On the board, inside the 7-day window** | **66 — 18 apply, 48 stretch** |
+
+Against 20 under the narrow rules, and one new job on the run that morning. The spec projected 65; the code produced 66.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `src/pipeline/screening.py` | The three tiers, and the five published tracks |
+| `src/pipeline/roles.py` | Data & BI, the eighth track |
+| `src/pipeline/publish.py` | 7-day window with the 5-day floor |
+| `frontend/src/components/JobCard.jsx` | View description, next to Apply |
+| `frontend/src/lib/format.js` | Cleaning the scraper's marks out of an advert |
+
+---
