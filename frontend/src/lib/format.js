@@ -77,3 +77,51 @@ export function formatJobDate(job) {
   if (added) return `Added ${added}`
   return null
 }
+
+/**
+ * Tidy the scraper's own marks out of an advert's text.
+ *
+ * Job ads arrive as scraped text, not as clean prose. Almost all of them
+ * (350 of 378 on the live board) use markdown-style `**` to mark their
+ * section headings, and about half carry backslash escapes like `\&` that
+ * the source site put there and nothing has taken out since. Shown raw, an
+ * ad opens with a line reading `***Job title*** ... \& Gap Analysis`.
+ */
+export function cleanDescription(text) {
+  return String(text || '')
+    .replace(/\\([&+\-*_#.])/g, '$1')
+    .replace(/\*{3,}/g, '**')
+    .trim()
+}
+
+/**
+ * Split an advert into plain and bold runs, so the `**` markers can be
+ * rendered as the headings they are instead of shown as punctuation.
+ *
+ * Returns segments rather than markup on purpose: the text is scraped, and
+ * handing it to dangerouslySetInnerHTML would put whatever an employer
+ * typed into the page as HTML. React escapes each segment for us.
+ *
+ * @returns {{text: string, bold: boolean}[]}
+ */
+export function descriptionSegments(text) {
+  const cleaned = cleanDescription(text)
+  const segments = []
+  const bold = /\*\*([\s\S]+?)\*\*/g
+  let cursor = 0
+  let match
+
+  while ((match = bold.exec(cleaned)) !== null) {
+    if (match.index > cursor) {
+      segments.push({ text: cleaned.slice(cursor, match.index), bold: false })
+    }
+    segments.push({ text: match[1], bold: true })
+    cursor = bold.lastIndex
+  }
+
+  if (cursor < cleaned.length) {
+    segments.push({ text: cleaned.slice(cursor), bold: false })
+  }
+
+  return segments.filter((segment) => segment.text !== '')
+}
