@@ -39,6 +39,7 @@ QA = "QA/Testing"
 BUSINESS_ANALYSIS = "Business Analysis & Low-code (Power Platform)"
 MOBILE = "Mobile"
 SECURITY = "Security"
+DATA = "Data & BI"
 
 ROLE_TYPES: Tuple[str, ...] = (
     SOFTWARE,
@@ -48,8 +49,19 @@ ROLE_TYPES: Tuple[str, ...] = (
     BUSINESS_ANALYSIS,
     MOBILE,
     SECURITY,
+    DATA,
 )
-"""The only role types allowed on the sheet and the board (F7, appendix)."""
+"""
+The only role types allowed on the sheet and the board (F7, appendix).
+
+``Data & BI`` is the eighth and was added after the fact. The original seven
+came out of the brief, and data work was not among them -- with the result
+that a *Junior Data Analyst* and a *Graduate Data Analyst (AI and Analytics)*
+came out of this module with no track at all, which the scope screen then
+reads as "not our kind of work". On the live board 24 of the 29 data jobs
+had no role type. A graduate who can write SQL and Python is a plausible
+candidate for those jobs, so the taxonomy was wrong, not the jobs.
+"""
 
 
 # ─── Search terms ───────────────────────────────────────────────────────────
@@ -198,6 +210,16 @@ _ROLE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
         r"power bi|dynamics 365|d365|sharepoint|business intelligence|"
         r"low.?code|process analyst)\b", re.I)),
 
+    # Sits after Business Analysis on purpose. "Power BI Developer" and
+    # "Business Intelligence Developer" are low-code reporting work and are
+    # claimed above; what is left for this rule is the analyst and pipeline
+    # work that shares a job title with nothing else.
+    (DATA, re.compile(
+        r"\b(data (?:analyst|engineer|scientist)|"
+        r"analytics (?:analyst|engineer|developer)|"
+        r"reporting analyst|etl developer|data warehouse|"
+        r"machine learning engineer|ml engineer)\b", re.I)),
+
     (SUPPORT, re.compile(
         r"\b(it support|service desk|help ?desk|desktop support|"
         r"technical support|support technician|support analyst|"
@@ -261,6 +283,10 @@ _DESCRIPTION_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
         r"service desk (?:analyst|engineer|technician)|"
         r"help ?desk (?:analyst|technician)|desktop support technician|"
         r"technical support (?:engineer|analyst|specialist))\b", re.I)),
+
+    (DATA, re.compile(
+        r"\b(data (?:analyst|engineer|scientist)|analytics engineer|"
+        r"reporting analyst|etl developer)\b", re.I)),
 
     (SOFTWARE, re.compile(
         r"\b(software developer|software engineer|"
