@@ -13,32 +13,38 @@ Indeed matches the words "engineer" and "developer" very loosely, which is how
 mining engineers, quantity surveyors and warehouse assistants ended up in the
 sheet. Nothing threw the wrong jobs out.
 
-Scope — only software development
----------------------------------
-CodeSpace teaches software development. A QA analyst post, an IT support desk
-and a SOC analyst are all tech jobs and all pass F1, but none of them is what
-the students are being trained for, and on the live board they crowded out the
-jobs that were. So a job only ships if F7 gave it the Software development
-track, read off its own title or a role phrase in its own body text.
+Scope — the tracks this course leads to
+---------------------------------------
+CodeSpace teaches people to build software. Core is software development and
+mobile; adjacent, and also published, are data & BI, QA and low-code, because
+a graduate who can write SQL and Python plausibly takes one of those first.
+Out are technical support, security and DevOps -- all genuinely technical,
+none of them where this course leads. A service desk leads to infrastructure,
+not development.
 
 Note what this is *not*: it is not a judgement that those tracks are worthless,
 and the pipeline still scrapes, enriches and classifies them. They are filed in
-the Exclude tab under this stage, so widening the scope later is a one-line
-change to ``PUBLISHED_ROLE_TYPES`` and a re-run, not a rebuild.
+the Exclude tab under this stage, so widening the scope later is a name added
+to ``PUBLISHED_ROLE_TYPES`` and a re-run, not a rebuild.
 
-F4 — the first three years of a career
---------------------------------------
-Only two levels ship: entry level and junior. Mid, senior, lead and principal
-are all above the cohort, as is anything asking for four or more years.
+F4 — apply, stretch, or out of reach
+------------------------------------
+Three outcomes, not two, because for a large middle group the honest answer is
+"worth a shot":
 
-Unknown goes too, and that is a reversal worth naming. Unknowns used to be
-kept, on the reasoning that an ad which says nothing about level is not
-evidence the job is out of reach -- and that is still true of any single ad.
-What it produced in aggregate was a board roughly half-filled with jobs whose
-level nobody had established, which is exactly what a graduate filtering for
-entry level is trying to avoid. A job that cannot show it is entry level or
-junior does not ship. The record is kept, flagged ``needs_review``, so the
-weekly QA pass can measure what that costs.
+    apply    entry level or junior, asking two years or fewer
+    stretch  mid asking three years or fewer, or no level established at all
+    neither  four or more years, or senior/lead/principal in any form
+
+The stretch tier is the whole point of the redesign. Under a two-way rule the
+board dropped 31 software jobs whose ads simply never mentioned a level --
+*Full Stack Developer*, *Software Engineer – GoLang* -- thrown out for lack of
+proof rather than for evidence against. It also dropped 28 asking for exactly
+three years, when a developer two years in reads that line, checks the
+requirements underneath, meets them, and applies anyway.
+
+The gate that does not move is seniority. Senior, lead and principal never
+reach the board, and neither does an ad asking four or more years.
 
 F1 runs first, then scope, then F4. When a job fails several screens the
 earliest reason is the one recorded: a Senior Quantity Surveyor belongs in the
@@ -87,8 +93,8 @@ Usage
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
-from src.pipeline.levels import ENTRY, JUNIOR, UNKNOWN
-from src.pipeline.roles import SOFTWARE
+from src.pipeline.levels import ENTRY, JUNIOR, MID, UNKNOWN
+from src.pipeline.roles import BUSINESS_ANALYSIS, DATA, MOBILE, QA, SOFTWARE
 from src.utils import log
 
 
@@ -97,7 +103,7 @@ from src.utils import log
 STAGE_NON_TECH = "F1 non-tech"
 """Label written to the Exclude tab's Stage column by the F1 screen."""
 
-STAGE_OFF_TRACK = "scope not software"
+STAGE_OFF_TRACK = "scope off track"
 """Label written to the Exclude tab's Stage column by the scope screen."""
 
 STAGE_ABOVE_COHORT = "F4 above cohort"
@@ -106,22 +112,63 @@ STAGE_ABOVE_COHORT = "F4 above cohort"
 MAX_YEARS_FOR_COHORT = 4
 """An ad asking for this many years or more is above our graduates (F4)."""
 
-PUBLISHED_ROLE_TYPES = frozenset({SOFTWARE})
-"""
-The only tracks that reach the sheet and the board.
+MAX_YEARS_FOR_APPLY = 2
+"""Above this, an ad is a stretch rather than a straightforward apply."""
 
-One entry, because CodeSpace teaches software development. Widening the scope
-is adding a role type here; nothing else in the pipeline needs to change,
-because every track is still scraped and classified.
+TIER_APPLY = "apply"
+"""Clearly in reach: the ad's own words put it at a graduate's level."""
+
+TIER_STRETCH = "stretch"
+"""
+Worth a shot: right kind of work, and the ad either reaches slightly past a
+graduate or says nothing at all about level.
+
+This tier exists because the alternative was throwing those jobs away. A
+developer two years in reads "3+ years required", checks the requirements
+listed underneath, meets them, and applies -- employers write the years line
+as a filter and then hire on the requirements. And a job that simply does
+not state a level is the single most common case in the data; silence is
+not evidence that a job is out of reach.
 """
 
-PUBLISHED_LEVELS = frozenset({ENTRY, JUNIOR})
+PUBLISHED_ROLE_TYPES = frozenset({SOFTWARE, MOBILE, QA, BUSINESS_ANALYSIS, DATA})
 """
-The only levels that reach the sheet and the board (F4).
+The tracks that reach the sheet and the board.
 
-Everything else is above the cohort or unestablished. Membership is what
-decides -- not a blocklist -- so a level nobody has heard of cannot slip
-through by not being on a list of things to reject.
+Core is software and mobile -- what CodeSpace teaches. The other three are
+adjacent: jobs a graduate who can build things plausibly takes first, on a
+different set of tools. Data & BI is in for exactly that reason, and its
+absence from the role taxonomy is why *Junior Data Analyst* used to come out
+of F7 with no track at all.
+
+Deliberately out: technical support, security, DevOps/cloud. All genuinely
+technical, none of them the work this course leads to -- a service desk
+leads to infrastructure, not development. They are still scraped, enriched
+and classified, and filed on the Exclude tab under this stage, so widening
+the scope is a name in this set and a re-run.
+"""
+
+PUBLISHED_LEVELS = frozenset({ENTRY, JUNIOR, MID, UNKNOWN})
+"""
+The levels that can reach the board at all, in one tier or another.
+
+Not a statement that a mid-level job is a graduate job -- ``tier_for``
+decides that, and lands most of them in stretch. This set is the outer
+boundary: senior, lead and principal never appear on the board whatever
+else an ad says.
+"""
+
+_SENIOR_TITLE = re.compile(
+    r"\b(senior|snr\.?|sr\.?|lead|principal|head of|chief|"
+    r"manager|architect)\b", re.I)
+"""
+Title words that put a job above a graduate whatever the level field says.
+
+Deliberately redundant with F2, which already reads these off the title and
+would normally have set the level to senior or lead. It is here because F2's
+rules are allowed to change, and a change there must not be able to quietly
+promote a Senior Developer into the stretch tier. A gate the spec names
+explicitly gets its own check.
 """
 
 SAMPLE_SIZE = 10
@@ -362,53 +409,78 @@ def screen_off_track(job: Dict[str, Any]) -> Tuple[bool, str, bool]:
         return False, "no role type -- title and description named no role", True
 
     source = job.get("role_source") or "unknown"
-    return False, f"role type is {role}, not software (from {source})", False
+    return False, f"role type is {role}, off track (from {source})", False
 
 
-# ─── F4: the first three years ──────────────────────────────────────────────
+# ─── F4: apply, stretch, or out of reach ────────────────────────────────────
+
+def _stated_years(job: Dict[str, Any]) -> Any:
+    """The years figure, or None. Guards against a bool sneaking in as 0/1."""
+    years = job.get("experience_years")
+    if isinstance(years, int) and not isinstance(years, bool):
+        return years
+    return None
+
 
 def screen_above_cohort(job: Dict[str, Any]) -> Tuple[bool, str, bool]:
     """
-    Decide whether a job is one of the two levels a graduate can take (F4).
+    Sort a job into apply, stretch, or out of reach (F4).
 
-    Only entry level and junior ship. Mid, senior, lead and principal are
-    above the cohort; so is an ad asking for four or more years; so is a job
-    whose level nobody could establish.
+    Three outcomes rather than two, because for a large middle group the
+    honest answer is "worth a shot" -- see ``TIER_APPLY`` and ``TIER_STRETCH``
+    for why that group exists at all.
+
+        apply    entry level or junior, asking two years or fewer
+        stretch  mid asking three years or fewer, or no level established
+        neither  four or more years, or senior/lead/principal in any form
 
     Args:
         job: Job dictionary, already leveled by F2 and dated by F3.
 
     Returns:
-        A (keep, reason, needs_review) tuple. needs_review marks a drop that
-        rests on softer evidence and should be checked by the weekly QA pass.
+        A (tier, reason, needs_review) tuple. tier is '' when the job is out
+        of reach, and reason then says why. needs_review marks a decision
+        resting on softer evidence, for the weekly QA pass -- on a drop it
+        means "we may have thrown away a good job", and on a stretch it means
+        "we put this in front of somebody without being sure".
     """
-    level = job.get("job_level") or ""
-    years = job.get("experience_years")
+    level = job.get("job_level") or UNKNOWN
+    years = _stated_years(job)
 
+    # ── Out of reach: the ad asks for more years than a graduate has ──
+    if years is not None and years >= MAX_YEARS_FOR_COHORT:
+        source = job.get("years_source") or "unknown"
+        evidence = job.get("years_evidence") or f"{years} years"
+        # A number the ad states outright is stronger than one a feed handed
+        # over, which we cannot trace back to any wording.
+        weak = source != "text"
+        return "", f"asks for {years}+ years (from {source}: '{evidence}')", weak
+
+    # ── Out of reach: seniority, from the level or from the title ──
     if level not in PUBLISHED_LEVELS:
         source = job.get("level_source") or "unknown"
         evidence = job.get("level_evidence") or "nothing recorded"
-
-        if not level or level == UNKNOWN:
-            # Nothing was wrong with the ad; we simply could not tell. Always
-            # reviewable, because this is the drop most likely to cost a
-            # graduate a job they could have had.
-            return False, "level could not be established", True
-
-        # A level read out of the body text is softer than one in the title.
         weak = source == "description"
-        return False, f"level is {level} (from {source}: '{evidence}')", weak
+        return "", f"level is {level} (from {source}: '{evidence}')", weak
 
-    if isinstance(years, int) and not isinstance(years, bool):
-        if years >= MAX_YEARS_FOR_COHORT:
-            source = job.get("years_source") or "unknown"
-            evidence = job.get("years_evidence") or f"{years} years"
-            # A number the ad states outright is stronger than one a feed
-            # handed over, which we cannot trace back to any wording.
-            weak = source != "text"
-            return False, f"asks for {years}+ years (from {source}: '{evidence}')", weak
+    senior_word = _SENIOR_TITLE.search(job.get("title") or "")
+    if senior_word:
+        return "", f"title says '{senior_word.group(0)}'", False
 
-    return True, "", False
+    # ── In reach ──
+    if level in (ENTRY, JUNIOR):
+        if years is None or years <= MAX_YEARS_FOR_APPLY:
+            return TIER_APPLY, "", False
+        # Says junior, asks three years. Both are true; the ad is a stretch.
+        return TIER_STRETCH, f"{level} but asks {years} years", False
+
+    if level == MID:
+        return TIER_STRETCH, f"mid level, asks {years if years is not None else 'no'} years", False
+
+    # Level could not be established. Nothing was wrong with the ad and
+    # nothing is wrong with the job -- we simply cannot tell, and the board
+    # should say so rather than either hide it or claim it is entry level.
+    return TIER_STRETCH, "level could not be established", True
 
 
 # ─── All three screens ──────────────────────────────────────────────────────
@@ -424,6 +496,10 @@ def screen_jobs(
     which is the one that actually matters. A Senior QA Engineer is filed as
     off-track rather than as senior, because widening the scope is a decision
     somebody might make and being senior is not.
+
+    Every kept job carries:
+        tier        -- 'apply' or 'stretch' (see TIER_APPLY / TIER_STRETCH)
+        tier_reason -- why it is a stretch rather than an apply ('' for apply)
 
     Excluded jobs are returned, never discarded, and each one carries:
         excluded_stage  -- which screen dropped it
@@ -444,6 +520,8 @@ def screen_jobs(
     counts: Dict[str, int] = {
         "input": len(jobs),
         "kept": 0,
+        "kept_apply": 0,
+        "kept_stretch": 0,
         "dropped_title_blocklist": 0,
         "dropped_role_not_accepted": 0,
         "dropped_off_track": 0,
@@ -459,7 +537,7 @@ def screen_jobs(
             _record_drop(job, excluded, counts, STAGE_NON_TECH, reason, kept_by, False)
             continue
 
-        # ── Scope: is it software development? ──
+        # ── Scope: is it a track we publish? ──
         keep, reason, needs_review = screen_off_track(job)
         if not keep:
             _record_drop(
@@ -468,21 +546,25 @@ def screen_jobs(
             )
             continue
 
-        # ── F4: is it entry level or junior? ──
-        keep, reason, needs_review = screen_above_cohort(job)
-        if not keep:
+        # ── F4: apply, stretch, or out of reach? ──
+        tier, reason, needs_review = screen_above_cohort(job)
+        if not tier:
             _record_drop(
                 job, excluded, counts,
                 STAGE_ABOVE_COHORT, reason, "above_cohort", needs_review,
             )
             continue
 
+        job["tier"] = tier
+        job["tier_reason"] = reason
         job["excluded_stage"] = ""
         job["excluded_reason"] = ""
         job["excluded_rule"] = kept_by
-        job["needs_review"] = False
+        job["needs_review"] = needs_review
         kept.append(job)
         counts["kept"] += 1
+        counts["kept_apply" if tier == TIER_APPLY else "kept_stretch"] += 1
+        counts["needs_review"] += int(needs_review)
 
     return kept, excluded, counts
 
@@ -538,6 +620,8 @@ def log_screening(
     """
     log(f"  screened {counts['input']} jobs "
         f"-> kept {counts['kept']}, dropped {counts['dropped_total']}")
+    log(f"    of the kept: {counts.get('kept_apply', 0)} apply, "
+        f"{counts.get('kept_stretch', 0)} stretch")
     log(f"    F1 dropped on title blocklist:   "
         f"{counts.get('dropped_title_blocklist', 0)}")
     log(f"    F1 dropped on role not accepted: "
