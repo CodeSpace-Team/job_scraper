@@ -1,19 +1,75 @@
 import { useMemo, useState } from 'react'
-import FilterPanel from './components/FilterPanel.jsx'
 import JobCard from './components/JobCard.jsx'
 import SearchBar from './components/SearchBar.jsx'
+import SearchForm from './components/SearchForm.jsx'
 import { useJobs } from './hooks/useJobs.js'
-import { EMPTY_FILTERS, extractFacets, filterJobs } from './lib/filters.js'
+import { extractFacets, matchesSearch } from './lib/filters.js'
+import { EMPTY_CRITERIA, matchJobs } from './lib/match.js'
 import { DEFAULT_SORT, SORT_OPTIONS, sortJobs } from './lib/sort.js'
+
+/**
+ * Skill names that are not things a student ticks to say what they can build.
+ *
+ * The pipeline's skills list is categorised, and most of it is technologies.
+ * These few come from its "ways of working" and support categories and read
+ * as filler in a picker -- nobody chooses their next job by whether the ad
+ * mentions Documentation. Git, Agile/Jira and Code Review are deliberately
+ * not here: those are real things somebody has or has not done.
+ */
+const NOT_A_TECH_SKILL = new Set([
+  'Problem Solving',
+  'Communication',
+  'Documentation',
+  'Customer Service',
+])
 
 export default function App() {
   const { jobs, loading, error } = useJobs()
-  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [criteria, setCriteria] = useState(EMPTY_CRITERIA)
+
+  // null until the student has actually searched. The board opens empty on
+  // purpose: 44% of jobs carry no evidence of their own level, so listing
+  // them up front would be presenting labels we do not trust as though we
+  // did. Nothing is shown until somebody has said what they are looking for.
+  const [results, setResults] = useState(null)
+
+  // Both of these narrow what is already on screen, so they live with the
+  // results rather than in the form -- there is nothing to keyword-search
+  // or re-order before a search has happened.
+  const [keyword, setKeyword] = useState('')
   const [sortBy, setSortBy] = useState(DEFAULT_SORT)
 
-  const facets = useMemo(() => extractFacets(jobs), [jobs])
-  const filtered = useMemo(() => filterJobs(jobs, filters), [jobs, filters])
-  const visible = useMemo(() => sortJobs(filtered, sortBy), [filtered, sortBy])
+  const facets = useMemo(() => {
+    const found = extractFacets(jobs)
+    return {
+      ...found,
+      levels: found.levels.filter((l) => l === 'entry level' || l === 'junior'),
+      skills: found.skills.filter((s) => !NOT_A_TECH_SKILL.has(s)),
+    }
+  }, [jobs])
+
+  const search = () => {
+    setKeyword('')
+    setSortBy(DEFAULT_SORT)
+    setResults(matchJobs(jobs, criteria))
+  }
+
+  // sortJobs works on jobs; the results carry a job plus why it matched, so
+  // it is applied to the jobs and the results put back in that order.
+  const shown = useMemo(() => {
+    if (results === null) return []
+    const narrowed = results.filter((r) => matchesSearch(r.job, keyword))
+    const order = sortJobs(narrowed.map((r) => r.job), sortBy)
+    return order.map((job) => narrowed.find((r) => r.job === job))
+  }, [results, keyword, sortBy])
+
+  const changeCriteria = (next) => {
+    setCriteria(next)
+    // A changed selection makes the results on screen stale. Clearing them
+    // is more honest than leaving a list that no longer answers the form
+    // above it.
+    setResults(null)
+  }
 
   return (
     <div className="min-h-screen bg-white">
@@ -40,29 +96,14 @@ export default function App() {
           </div>
         )}
 
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row">
-          <div className="flex-1">
-            <SearchBar
-              value={filters.search}
-              onChange={(search) => setFilters({ ...filters, search })}
-            />
-          </div>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            aria-label="Sort jobs"
-            className="rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-codespace-teal focus:outline-none focus:ring-1 focus:ring-codespace-teal"
-          >
-            {SORT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
         <div className="flex flex-col gap-6 md:flex-row">
-          <FilterPanel facets={facets} filters={filters} onChange={setFilters} />
+          <SearchForm
+            facets={facets}
+            criteria={criteria}
+            onChange={changeCriteria}
+            onSearch={search}
+            resultCount={results === null ? null : results.length}
+          />
 
           {/* min-w-0 for the same reason as in JobCard: without it this
               column cannot shrink below the widest card it contains, and a
@@ -76,40 +117,58 @@ export default function App() {
                 />
                 Loading jobs...
               </div>
+            ) : results === null ? (
+              <div className="rounded-lg border border-dashed border-neutral-300 bg-neutral-50 p-8 text-center">
+                <h2 className="text-base font-semibold text-codespace-ink">
+                  Tell us what you are looking for
+                </h2>
+                <p className="mx-auto mt-2 max-w-md text-sm text-neutral-600">
+                  Pick the kind of work you want and where you are in your career,
+                  then add the skills you already have. We match on what each advert
+                  actually asks for, not on what it calls itself.
+                </p>
+                <p className="mt-3 text-xs text-neutral-500">
+                  {jobs.length} jobs open right now.
+                </p>
+              </div>
             ) : (
               <>
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+                  <div className="min-w-0 flex-1">
+                    <SearchBar value={keyword} onChange={setKeyword} />
+                  </div>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    aria-label="Sort jobs"
+                    className="rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-codespace-teal focus:outline-none focus:ring-1 focus:ring-codespace-teal"
+                  >
+                    {SORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <p className="mb-3 text-sm text-neutral-600">
-                  {visible.length} of {jobs.length} jobs
+                  {shown.length} of {jobs.length} jobs match
                 </p>
-                {/* The index is part of the key on purpose. Keys have to be
-                    unique among siblings, and the apply link is not: the
-                    board carried the same Power Platform advert on six rows
-                    and the same ABAP advert on five, because a job with no
-                    company name matched nothing in the publisher's merge and
-                    was appended again every day.
-
-                    React does not error on repeated keys, it mis-reconciles
-                    -- on a filter change it left stale cards in the DOM, so
-                    the board said "4 of 377 jobs" above thirty-two cards.
-                    That is the screen Emma opened and reported.
-
-                    The publisher no longer creates those rows, but a key
-                    must not depend on data being clean to work. Appending
-                    the index makes it unique whatever arrives. It costs the
-                    re-use of a card's DOM node when the list reorders, which
-                    on a few hundred cards is not measurable. */}
                 <div className="space-y-3">
-                  {visible.map((job, i) => (
+                  {shown.map((result, i) => (
                     <JobCard
-                      key={`${job.job_url || `${job.title}-${job.company}`}#${i}`}
-                      job={job}
+                      key={`${result.job.job_url || result.job.title}#${i}`}
+                      job={result.job}
+                      match={result}
+                      pickedSkills={criteria.skills.length}
                     />
                   ))}
                 </div>
-                {visible.length === 0 && jobs.length > 0 && (
+                {shown.length === 0 && (
                   <div className="rounded-lg border border-neutral-200 bg-white p-6 text-center">
                     <p className="text-sm text-neutral-600">
-                      No jobs match these filters. Try clearing some from the panel on the left.
+                      Nothing open matches that today. Try another kind of work, or
+                      widen where you are.
                     </p>
                   </div>
                 )}

@@ -1,12 +1,17 @@
 /**
  * Integration test for the board's top-level page (F6).
  *
- * Exercises the real wiring -- fetch, filtering, rendering -- together,
- * the way a person actually uses the page, rather than each piece in
- * isolation.
+ * Exercises the real wiring -- fetch, matching, rendering -- together, the
+ * way a person actually uses the page, rather than each piece in isolation.
+ *
+ * The flow it tests is a gate, not a feed. The board shows nothing until a
+ * student has said what they are looking for, because its labels are not
+ * worth presenting on their own: 44% of jobs on a real board carry no
+ * evidence of their own level, and an employer typing "Junior" into a title
+ * costs them nothing.
  */
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.jsx'
@@ -15,30 +20,40 @@ const SAMPLE_JOBS = [
   {
     title: 'Junior React Developer',
     company: 'Acme',
-    role_type: 'Software Development',
-    job_level: 'entry',
+    role_type: 'Software development',
+    job_level: 'junior',
+    level_source: 'years',
+    experience_years: 2,
     must_have_skills: 'JavaScript, React',
     job_url: 'https://example.com/1',
     date_posted: '2026-08-01',
   },
   {
-    title: 'IT Support Technician',
+    title: 'Graduate Data Analyst',
     company: 'Widgets Inc',
-    role_type: 'Technical Support',
-    job_level: 'entry',
-    must_have_skills: 'Windows, Networking',
+    role_type: 'Data & BI',
+    job_level: 'entry level',
+    level_source: 'title',
+    must_have_skills: 'SQL (MySQL/Postgres), Python',
     job_url: 'https://example.com/2',
     date_posted: '2026-08-14',
   },
 ]
 
-beforeEach(() => {
+function mockJobs(jobs) {
   global.fetch = vi.fn(() =>
-    Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ jobs: SAMPLE_JOBS }),
-    }),
+    Promise.resolve({ ok: true, json: () => Promise.resolve({ jobs }) }),
   )
+}
+
+async function searchFor(user, { work, level } = {}) {
+  if (work) await user.click(screen.getByRole('checkbox', { name: new RegExp(work) }))
+  if (level) await user.click(screen.getByRole('checkbox', { name: new RegExp(level) }))
+  await user.click(screen.getByRole('button', { name: 'Search for jobs' }))
+}
+
+beforeEach(() => {
+  mockJobs(SAMPLE_JOBS)
 })
 
 afterEach(() => {
@@ -46,136 +61,195 @@ afterEach(() => {
 })
 
 describe('App', () => {
-  it('loads and shows every job by default', async () => {
-    render(<App />)
-
-    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
-    expect(screen.getByText('Junior React Developer')).toBeInTheDocument()
-    expect(screen.getByText('IT Support Technician')).toBeInTheDocument()
-  })
-
-  it('narrows results as you type in the search box', async () => {
-    const user = userEvent.setup()
-    render(<App />)
-    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
-
-    await user.type(screen.getByLabelText('Search jobs'), 'react')
-
-    await waitFor(() => expect(screen.getByText('1 of 2 jobs')).toBeInTheDocument())
-    expect(screen.getByText('Junior React Developer')).toBeInTheDocument()
-    expect(screen.queryByText('IT Support Technician')).not.toBeInTheDocument()
-  })
-
-  it('shows a message when fetching jobs.json fails', async () => {
-    global.fetch = vi.fn(() => Promise.resolve({ ok: false, status: 500 }))
+  it('shows no jobs at all until the student has searched', async () => {
     render(<App />)
 
     await waitFor(() =>
-      expect(screen.getByText(/Could not load today's jobs/)).toBeInTheDocument(),
+      expect(screen.getByText('Tell us what you are looking for')).toBeInTheDocument(),
     )
+
+    expect(screen.queryByRole('heading', { level: 2, name: 'Junior React Developer' }))
+      .not.toBeInTheDocument()
+    expect(screen.getByText('2 jobs open right now.')).toBeInTheDocument()
   })
 
-  it('shows a friendly message when no jobs match the filters', async () => {
-    const user = userEvent.setup()
+  it('will not search until there is something to search on', async () => {
     render(<App />)
-    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
 
-    await user.type(screen.getByLabelText('Search jobs'), 'no such job anywhere')
-
-    await waitFor(() =>
-      expect(screen.getByText(/No jobs match these filters/)).toBeInTheDocument(),
-    )
+    expect(screen.getByRole('button', { name: 'Search for jobs' })).toBeDisabled()
   })
 
-  it('defaults to newest first, and re-orders when the sort is changed', async () => {
+  it('shows the jobs on the track the student chose, and only those', async () => {
     const user = userEvent.setup()
     render(<App />)
-    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
 
-    const titlesInOrder = () =>
-      screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    await searchFor(user, { work: 'Software development' })
 
-    expect(titlesInOrder()).toEqual(['IT Support Technician', 'Junior React Developer'])
+    expect(screen.getByText('1 of 2 jobs match')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Junior React Developer' }))
+      .toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 2, name: 'Graduate Data Analyst' }))
+      .not.toBeInTheDocument()
+  })
+
+  it('matches on the years an ad states, not the word in its title', async () => {
+    /*
+     * The rule the whole redesign rests on. This ad calls itself junior and
+     * then asks for five years. A student at junior level should not be
+     * shown it, whatever it calls itself.
+     */
+    mockJobs([{
+      ...SAMPLE_JOBS[0],
+      title: 'Junior Developer (really is not)',
+      level_source: 'title',
+      experience_years: 5,
+    }])
+
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    await searchFor(user, { level: 'junior' })
+
+    expect(screen.getByText('0 of 1 jobs match')).toBeInTheDocument()
+    expect(screen.getByText(/Nothing open matches that today/)).toBeInTheDocument()
+  })
+
+  it('says what each match rests on', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    await searchFor(user, { work: 'Software development' })
+
+    expect(screen.getByText('Asks for 2 years')).toBeInTheDocument()
+  })
+
+  it('warns when a job is only titled for the level and says nothing else', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    await searchFor(user, { work: 'Data & BI' })
+
+    expect(screen.getByText(/the ad gives no other detail/i)).toBeInTheDocument()
+  })
+
+  it('orders by skill overlap and says how much each job matched', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    await user.click(screen.getByRole('checkbox', { name: /entry level/ }))
+    await user.click(screen.getByRole('checkbox', { name: /^junior/ }))
+    await user.click(screen.getByRole('checkbox', { name: /React/ }))
+    await user.click(screen.getByRole('button', { name: 'Search for jobs' }))
+
+    const cards = screen.getAllByRole('heading', { level: 2 })
+    expect(cards[0]).toHaveTextContent('Junior React Developer')
+    expect(screen.getByText(/Matches 1 of your 1 skills/)).toBeInTheDocument()
+    expect(screen.getByText(/Matches 0 of your 1 skills/)).toBeInTheDocument()
+  })
+
+  it('never hides a job for a skill the student lacks', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    await user.click(screen.getByRole('checkbox', { name: /entry level/ }))
+    await user.click(screen.getByRole('checkbox', { name: /^junior/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Python/ }))
+    await user.click(screen.getByRole('button', { name: 'Search for jobs' }))
+
+    expect(screen.getByText('2 of 2 jobs match')).toBeInTheDocument()
+  })
+
+  it('clears stale results when the selection changes', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    await searchFor(user, { work: 'Software development' })
+    expect(screen.getByText('1 of 2 jobs match')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('checkbox', { name: /Data & BI/ }))
+
+    expect(screen.queryByText(/jobs match/)).not.toBeInTheDocument()
+    expect(screen.getByText('Tell us what you are looking for')).toBeInTheDocument()
+  })
+
+  it('narrows the results with the keyword box, once there are results', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    expect(screen.queryByLabelText('Search jobs')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('checkbox', { name: /entry level/ }))
+    await user.click(screen.getByRole('checkbox', { name: /^junior/ }))
+    await user.click(screen.getByRole('button', { name: 'Search for jobs' }))
+    expect(screen.getByText('2 of 2 jobs match')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Search jobs'), 'Acme')
+
+    await waitFor(() => expect(screen.getByText('1 of 2 jobs match')).toBeInTheDocument())
+  })
+
+  it('re-orders on request without losing the match reasons', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    await user.click(screen.getByRole('checkbox', { name: /entry level/ }))
+    await user.click(screen.getByRole('checkbox', { name: /^junior/ }))
+    await user.click(screen.getByRole('button', { name: 'Search for jobs' }))
 
     await user.selectOptions(screen.getByLabelText('Sort jobs'), 'oldest')
 
-    expect(titlesInOrder()).toEqual(['Junior React Developer', 'IT Support Technician'])
+    const headings = screen.getAllByRole('heading', { level: 2 })
+    expect(headings[0]).toHaveTextContent('Junior React Developer')
+    expect(screen.getByText('Asks for 2 years')).toBeInTheDocument()
   })
 
-  it('the filter panel\'s "clear all filters" button resets search and shows every job again', async () => {
-    const user = userEvent.setup()
-    render(<App />)
-    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
-
-    await user.type(screen.getByLabelText('Search jobs'), 'no such job anywhere')
-    await waitFor(() => expect(screen.getByText('Clear all filters')).toBeInTheDocument())
-
-    await user.click(screen.getByText('Clear all filters'))
-
-    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
-  })
   it('draws exactly as many cards as the count claims, even when two jobs share an apply link', async () => {
     /*
-     * The defect Emma reported: the board said "4 of 377 jobs" with
-     * thirty-two cards under it, the first of them nothing to do with what
-     * she had filtered for.
-     *
-     * The cause was not the filtering -- filterJobs had it right all along.
-     * It was the card key. Twenty-one rows on the live board shared an apply
-     * link with another row, React does not error on repeated keys but
-     * mis-reconciles them, and on a filter change it left stale cards in the
-     * DOM. The count read from the filtered array and told the truth; the
-     * cards did not.
+     * Emma's report: the board said "4 of 377 jobs" with thirty-two cards
+     * under it. Twenty-one rows shared an apply link, React mis-reconciled
+     * the repeated keys, and stale cards were left in the DOM.
      */
+    mockJobs([
+      SAMPLE_JOBS[0],
+      { ...SAMPLE_JOBS[0], title: 'Junior React Developer (Cape Town)' },
+      { ...SAMPLE_JOBS[0], title: 'Junior React Developer (Durban)' },
+    ])
+
     const user = userEvent.setup()
-    global.fetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            jobs: [
-              ...SAMPLE_JOBS,
-              { ...SAMPLE_JOBS[1], title: 'IT Support Technician (Cape Town)' },
-              { ...SAMPLE_JOBS[1], title: 'IT Support Technician (Durban)' },
-            ],
-          }),
-      }),
-    )
-
     render(<App />)
-    await waitFor(() => expect(screen.getByText('4 of 4 jobs')).toBeInTheDocument())
-    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(4)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
 
-    await user.type(screen.getByLabelText('Search jobs'), 'React')
+    await searchFor(user, { work: 'Software development' })
+    expect(screen.getByText('3 of 3 jobs match')).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(3)
 
-    await waitFor(() => expect(screen.getByText('1 of 4 jobs')).toBeInTheDocument())
+    await user.type(screen.getByLabelText('Search jobs'), 'Durban')
+
+    await waitFor(() => expect(screen.getByText('1 of 3 jobs match')).toBeInTheDocument())
     expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(1)
-    expect(screen.getByText('Junior React Developer')).toBeInTheDocument()
   })
-  it('shows the advert on demand, so nobody clicks Apply to find out what the job wants', async () => {
-    /*
-     * A student with only the one-line blurb has to open the employer's site
-     * to learn what the job actually asks for -- and finds out there that it
-     * wanted five years. The description was already on the card; it just
-     * was not shown.
-     */
-    const user = userEvent.setup()
-    global.fetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            jobs: [{
-              ...SAMPLE_JOBS[0],
-              description_snippet:
-                'We are looking for a junior developer.\n\nYou will need React and a willingness to learn.',
-            }],
-          }),
-      }),
-    )
 
+  it('shows the advert on demand, so nobody clicks Apply to find out what the job wants', async () => {
+    mockJobs([{
+      ...SAMPLE_JOBS[0],
+      description_snippet:
+        'We are looking for a junior developer.\n\nYou will need React and a willingness to learn.',
+    }])
+
+    const user = userEvent.setup()
     render(<App />)
-    await waitFor(() => expect(screen.getByText('1 of 1 jobs')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+    await searchFor(user, { work: 'Software development' })
 
     expect(screen.queryByText(/willingness to learn/)).not.toBeInTheDocument()
 
@@ -193,8 +267,23 @@ describe('App', () => {
   })
 
   it('offers no description button when the job has no description', async () => {
+    const user = userEvent.setup()
     render(<App />)
-    await waitFor(() => expect(screen.getByText('2 of 2 jobs')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+    await searchFor(user, { work: 'Software development' })
+
     expect(screen.queryByRole('button', { name: 'View description' })).not.toBeInTheDocument()
+  })
+
+  it('offers no soft skills in the picker', async () => {
+    mockJobs([{ ...SAMPLE_JOBS[0], must_have_skills: 'React, Communication, Documentation' }])
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    const form = screen.getByRole('form', { name: /Find jobs/i })
+    expect(within(form).getByRole('checkbox', { name: /React/ })).toBeInTheDocument()
+    expect(within(form).queryByRole('checkbox', { name: /Communication/ })).not.toBeInTheDocument()
+    expect(within(form).queryByRole('checkbox', { name: /Documentation/ })).not.toBeInTheDocument()
   })
 })
