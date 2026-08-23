@@ -48,6 +48,7 @@ SCRAPED = "combined_jobs.json"
 ENRICHED = "combined_jobs_enriched.json"
 LEVELED = "combined_jobs_leveled.json"
 EXCLUDED = "excluded_jobs.json"
+BOARD = "board_jobs.json"
 
 FINGERPRINTS: Tuple[Tuple[str, str, str], ...] = (
     # (feature, field, which file it should appear in)
@@ -57,6 +58,8 @@ FINGERPRINTS: Tuple[Tuple[str, str, str], ...] = (
     ("F2 levels", "ai_job_level", LEVELED),
     ("F1/F4 screen", "excluded_stage", EXCLUDED),
     ("F4 review flag", "needs_review", EXCLUDED),
+    ("F7 tracks", "role_type", LEVELED),
+    ("apply/stretch tiers", "tier", BOARD),
 )
 """
 Fields each feature leaves behind, and where to look for them.
@@ -108,9 +111,14 @@ def count_of(jobs: Optional[List[Dict[str, Any]]]) -> str:
 def kept_jobs(
     leveled: Optional[List[Dict[str, Any]]],
     excluded: Optional[List[Dict[str, Any]]],
+    board: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Work out which jobs actually reached the board.
+
+    Prefers board_jobs.json, which the orchestrator writes straight after
+    screening and which carries each job's tier. Falls back to subtraction
+    for runs from before that file existed.
 
     combined_jobs_leveled.json is saved by the orchestrator *before*
     screening runs, so it never carries 'excluded_stage' -- checking that
@@ -127,6 +135,9 @@ def kept_jobs(
         If excluded is missing too, this is the full leveled list -- the
         best available answer, not a claim that nothing was dropped.
     """
+    if board:
+        return board
+
     if leveled is None:
         return None
 
@@ -261,10 +272,8 @@ def print_stages(files: Dict[str, Optional[List[Dict[str, Any]]]]) -> None:
     leveled = files[LEVELED]
     excluded = files[EXCLUDED]
 
-    kept = kept_jobs(leveled, excluded)
+    kept = kept_jobs(leveled, excluded, files.get(BOARD))
     reaching_board = None if kept is None else len(kept)
-
-    print("\nWHAT HAPPENED TO THE JOBS")
 
     print("\nWHAT HAPPENED TO THE JOBS")
     print(f"  scraped, after duplicates removed  {count_of(files[SCRAPED])}")
@@ -298,12 +307,13 @@ def print_drops(excluded: Optional[List[Dict[str, Any]]]) -> None:
 def print_levels(
     leveled: Optional[List[Dict[str, Any]]],
     excluded: Optional[List[Dict[str, Any]]],
+    board: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Print the level and years breakdown for jobs reaching the board."""
     if not leveled:
         return
 
-    kept = kept_jobs(leveled, excluded)
+    kept = kept_jobs(leveled, excluded, board)
     if not kept:
         return
 
@@ -313,9 +323,30 @@ def print_levels(
     rate = filled / len(kept) * 100
 
     print("\nWHAT REACHED THE BOARD LOOKS LIKE")
+
+    # The tier is the decision now, so it goes first. Read on its own, the
+    # level breakdown below is alarming and shouldn't be -- "unknown 45%,
+    # mid 29%" is the stretch tier working exactly as designed, not the
+    # leveling falling over.
+    by_tier = Counter(job.get("tier") or "(not set)" for job in kept)
+    if set(by_tier) != {"(not set)"}:
+        for tier, count in by_tier.most_common():
+            share = count / len(kept) * 100
+            label = {
+                "apply": "apply    (clearly in reach)",
+                "stretch": "stretch  (worth a shot)",
+            }.get(tier, tier)
+            print(f"  {label:<30} {count:>4}  ({share:.0f}%)")
+        print()
+    else:
+        print("  ⚠ no job carries a tier — the runner is on code older than")
+        print("    the apply/stretch split, whatever the other numbers say")
+        print()
+
+    print("  by level, which is now working rather than deciding:")
     for level, count in by_level.most_common():
         share = count / len(kept) * 100
-        print(f"  {level:<14} {count:>4}  ({share:.0f}%)")
+        print(f"    {level:<14} {count:>4}  ({share:.0f}%)")
 
     sources = ", ".join(f"{k} {v}" for k, v in by_source.most_common())
     print(f"\n  level decided by: {sources}")
@@ -374,7 +405,7 @@ def main() -> int:
 
     files = {
         name: load(folder / name)
-        for name in (SCRAPED, ENRICHED, LEVELED, EXCLUDED)
+        for name in (SCRAPED, ENRICHED, LEVELED, EXCLUDED, BOARD)
     }
 
     if all(jobs is None for jobs in files.values()):
@@ -388,7 +419,7 @@ def main() -> int:
 
     print_stages(files)
     print_drops(files[EXCLUDED])
-    print_levels(files[LEVELED], files[EXCLUDED])
+    print_levels(files[LEVELED], files[EXCLUDED], files.get(BOARD))
 
     problems: List[str] = []
     problems += check_fingerprints(files)
