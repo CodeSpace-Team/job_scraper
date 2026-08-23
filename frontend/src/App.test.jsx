@@ -286,4 +286,51 @@ describe('App', () => {
     expect(within(form).queryByRole('checkbox', { name: /Communication/ })).not.toBeInTheDocument()
     expect(within(form).queryByRole('checkbox', { name: /Documentation/ })).not.toBeInTheDocument()
   })
+  it('highlights the student\'s own skills inside the advert', async () => {
+    /*
+     * The point of the description panel is that a student does not have to
+     * read three thousand characters to find out whether the job wants what
+     * they have. The yellow is the answer to that question.
+     */
+    mockJobs([{
+      ...SAMPLE_JOBS[0],
+      must_have_skills: 'React, SQL (MySQL/Postgres)',
+      description_snippet:
+        'You will build with React and query Postgres. '
+        + 'JavaScript frameworks welcome. Please go the extra mile.',
+    }])
+
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    await user.click(screen.getByRole('checkbox', { name: /^React/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Software development/ }))
+    await user.click(screen.getByRole('button', { name: 'Search for jobs' }))
+    await user.click(screen.getByRole('button', { name: 'View description' }))
+
+    const marks = document.querySelectorAll('article mark')
+    const marked = [...marks].map((m) => m.textContent)
+
+    expect(marked).toContain('React')
+    // Not picked by the student, so not highlighted even though the job
+    // asks for it -- the yellow means "you have this", not "they want it".
+    expect(marked).not.toContain('Postgres')
+    expect(marked.join(' ')).not.toMatch(/\bgo\b/)
+  })
+
+  it('highlights nothing when the student picked no skills', async () => {
+    mockJobs([{
+      ...SAMPLE_JOBS[0],
+      description_snippet: 'You will build with React and query Postgres.',
+    }])
+
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+    await searchFor(user, { work: 'Software development' })
+    await user.click(screen.getByRole('button', { name: 'View description' }))
+
+    expect(document.querySelectorAll('article mark')).toHaveLength(0)
+  })
 })
