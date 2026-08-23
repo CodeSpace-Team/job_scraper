@@ -233,6 +233,14 @@ def main() -> None:
 
     save_jobs(excluded_jobs, "data/cache/excluded_jobs.json")
 
+    # What survived, with its tier on it. combined_jobs_leveled.json is
+    # written above, before screening, so it has neither the tier nor any
+    # idea which jobs were kept -- the morning check had to subtract one
+    # file from the other to guess, and the QA sampler was drawing its
+    # twenty jobs from all 642 scraped, so most of a review went on jobs
+    # that never reached anybody.
+    save_jobs(all_jobs, "data/cache/board_jobs.json")
+
     if not all_jobs:
         log("\n✗ ERROR: every scraped job was screened out!")
         log("  This usually means enrichment failed and no titles matched.")
