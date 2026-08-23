@@ -1027,3 +1027,69 @@ The keyword box and the sort control are still there — they moved into the res
 | `frontend/src/components/JobCard.jsx` | The match note, and no level badge |
 
 ---
+
+## Three fixes off the first real run of the tiers
+
+Run 137 was the first daily run under the apply/stretch tiers. The morning check said the numbers added up, and reading it properly found three things anyway.
+
+### 1. A QA job thrown away, and what it says about F1 and F7
+
+The check's "doubtful ones" list — the drops flagged for review — opened with titles like *Software Quality Analyst*. Traced:
+
+```
+F1:  kept    (title:tech_analyst)   ← F1 says this is a tech job
+F7:  (none)                          ← F7 cannot name its track
+→ dropped by the scope screen
+```
+
+QA is in scope. That was a QA job thrown away because **F1 can accept a job on the AI's role label, while F7 only ever reads the ad**. Where they disagree, and the scope screen now drops whatever F7 could not name, the disagreement costs a job.
+
+The first instinct was to widen F7 until it agreed with F1. Measuring it killed that idea. 137 of 378 jobs on the live board are F1-yes / F7-silent, and reading the list shows most of it is **F1 being loose, not F7 being narrow**:
+
+| Title | Kept by F1 because |
+| :--- | :--- |
+| ESG Country Analyst | the AI called it `tech_analyst` |
+| Client Services Specialist | the AI called it `support` |
+| Support Centre Consultant: Irrigation | the AI called it `support` |
+| Cancellation & Retention Specialist | the AI called it `support` |
+
+Widening F7 to agree would import that looseness and undo the reason the scope screen exists. So the disagreement is now **printed in the run log rather than designed away** — ten titles a day, the ones worth reading — and the two real misses in it got their own rules:
+
+- `Software Quality Analyst` → QA. Qualified tightly: the first version allowed "product" and "controller" and promptly claimed *Product Quality Controller*, which is a factory floor. A bare "Quality Analyst" is as often manufacturing as it is a test team.
+- `Data Analytics` → Data & BI. The rule read `data analyst`, and analytics is not analyst, so *Graduate Intern: Data Analytics* appeared twice on the board with no track at all.
+
+157 jobs now pass, against 154 before. The remaining 137 unnamed titles are the review queue, and that is the honest state of it.
+
+### 2. The morning check reported levels, not tiers
+
+The tier is the decision now. Read on its own, the level breakdown is alarming and should not be — "unknown 45%, mid 29%" is the stretch tier working exactly as designed, not the leveling falling over. The check leads with the tier and treats level as working rather than deciding:
+
+```
+WHAT REACHED THE BOARD LOOKS LIKE
+  stretch  (worth a shot)         110  (70%)
+  apply    (clearly in reach)      47  (30%)
+
+  by level, which is now working rather than deciding:
+    unknown          67  (43%)
+```
+
+This needed a file that did not exist. `combined_jobs_leveled.json` is saved *before* screening, so it carries no tier and no idea which jobs were kept — the check had been subtracting the excluded file from it to guess. The run now saves `board_jobs.json` straight after screening, and a run without one says so plainly rather than reporting silence as health.
+
+(While in there: `WHAT HAPPENED TO THE JOBS` was being printed twice, which is visible in run 137's output.)
+
+### 3. The level review was reading the wrong twenty jobs
+
+The QA sampler drew from all 642 jobs the run touched. Fifteen of run 137's twenty rows were a *Wakeboarding Crew* instructor, a *Physics and Mathematics Teacher*, a *Medical Officer* and an *ACCA Trainee Accountant* — jobs nobody would ever be shown. A review pass is somebody reading twenty adverts by hand; it belongs on the jobs a graduate actually sees.
+
+It now samples `board_jobs.json`. `-i data/cache/combined_jobs_leveled.json` still gets the old behaviour, which remains the right file when the question is how well F2 levels in general rather than how good the board is.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `src/pipeline/roles.py` | The two new rules, and the unnamed-titles list in the run log |
+| `src/core/orchestrator.py` | Saves `board_jobs.json` after screening |
+| `scripts/morning_check.py` | Leads with tiers; reads the board file; header printed once |
+| `src/pipeline/qa.py` | Level review samples the board by default |
+
+---
