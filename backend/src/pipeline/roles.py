@@ -41,6 +41,20 @@ MOBILE = "Mobile"
 SECURITY = "Security"
 DATA = "Data & BI"
 
+UNNAMED_SAMPLE = 10
+"""
+How many unnamed titles to print in the run log.
+
+These are the jobs where F1 and this module disagree -- F1 kept them because
+the AI called them tech, and the ad's own words name no role. Measured on a
+live board that was 137 of 378, and reading the list showed most of it was
+F1 being loose rather than this module being narrow: an *ESG Country
+Analyst* and a *Cancellation & Retention Specialist* were both kept by F1 on
+the AI's word. Widening this module to agree would import that looseness.
+So the disagreement is printed rather than designed away, and the real
+misses in it get their own rule.
+"""
+
 ROLE_TYPES: Tuple[str, ...] = (
     SOFTWARE,
     SUPPORT,
@@ -191,7 +205,18 @@ _ROLE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     (QA, re.compile(
         r"\b(qa\b|q\.a\.|quality assurance|software tester|test analyst|"
         r"test engineer|automation tester|test automation|testing analyst|"
-        r"quality engineer|sdet)\b", re.I)),
+        r"quality engineer|sdet|"
+        # "Software Quality Analyst" came off a live run in the doubtful
+        # pile: F1 kept it as a tech analyst, this module could not name it,
+        # and the scope screen threw a QA job away.
+        #
+        # Qualified tightly, and the first attempt was not tight enough --
+        # allowing "product" and "controller" pulled in "Product Quality
+        # Controller", which is a factory floor. A bare "Quality Analyst" is
+        # as often manufacturing as it is a test team, so the software word
+        # has to be there.
+        r"(?:software|application|systems?) quality (?:analyst|specialist))\b",
+        re.I)),
 
     (MOBILE, re.compile(
         r"\b(flutter|react native|android developer|ios developer|"
@@ -215,7 +240,7 @@ _ROLE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     # claimed above; what is left for this rule is the analyst and pipeline
     # work that shares a job title with nothing else.
     (DATA, re.compile(
-        r"\b(data (?:analyst|engineer|scientist)|"
+        r"\b(data (?:analyst|analytics|engineer|scientist)|"
         r"analytics (?:analyst|engineer|developer)|"
         r"reporting analyst|etl developer|data warehouse|"
         r"machine learning engineer|ml engineer)\b", re.I)),
@@ -446,3 +471,12 @@ def log_roles(jobs: Sequence[Dict[str, Any]]) -> None:
     if disagreements:
         log(f"  {disagreements} jobs got a role type but the AI gave no "
             f"role label at all -- worth a look before trusting either on its own")
+
+    unnamed = [job for job in jobs if not job.get("role_type")]
+    if unnamed:
+        log(f"  {len(unnamed)} jobs this module could not name a track for. "
+            f"F1 keeps a job on the AI's role label; this module only reads "
+            f"the ad. Where they disagree the job is dropped by scope, so "
+            f"these are the ones to read:")
+        for job in unnamed[:UNNAMED_SAMPLE]:
+            log(f"    - {(job.get('title') or '(no title)')[:60]}")
