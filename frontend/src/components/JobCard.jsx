@@ -1,5 +1,6 @@
-import { useId, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { jobSkills, splitSkills } from '../lib/filters.js'
+import { highlightTerms, splitOnTerms } from '../lib/match.js'
 import {
   descriptionSegments,
   formatJobDate,
@@ -79,6 +80,14 @@ export default function JobCard({ job, match = null, pickedSkills = 0 }) {
   const [showDescription, setShowDescription] = useState(false)
   const descriptionId = useId()
   const description = (job.description_snippet || '').trim()
+
+  // The skills a student picked that this job also asks for. Highlighting
+  // those in the advert is the difference between reading three thousand
+  // characters and glancing at where the yellow is.
+  const terms = useMemo(
+    () => highlightTerms(match?.overlap || []),
+    [match?.overlap],
+  )
 
   return (
     <article className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm transition hover:shadow-md">
@@ -171,17 +180,35 @@ export default function JobCard({ job, match = null, pickedSkills = 0 }) {
             typed straight into the page.
           */}
           <p className="whitespace-pre-line break-words text-sm leading-relaxed text-neutral-700">
-            {descriptionSegments(description).map((segment, i) =>
-              segment.bold ? (
+            {descriptionSegments(description).map((segment, i) => {
+              const runs = splitOnTerms(segment.text, terms).map((run, j) =>
+                run.hit ? (
+                  <mark
+                    key={j}
+                    className="rounded-sm bg-yellow-200 px-0.5 font-medium text-codespace-ink"
+                  >
+                    {run.text}
+                  </mark>
+                ) : (
+                  run.text
+                ),
+              )
+              return segment.bold ? (
                 <strong key={i} className="font-semibold text-codespace-ink">
-                  {segment.text}
+                  {runs}
                 </strong>
               ) : (
-                <span key={i}>{segment.text}</span>
-              ),
-            )}
+                <span key={i}>{runs}</span>
+              )
+            })}
           </p>
           <p className="mt-2 text-xs text-neutral-500">
+            {terms.length > 0 && (
+              <span className="text-neutral-600">
+                Your skills are{' '}
+                <mark className="rounded-sm bg-yellow-200 px-0.5">highlighted</mark>.{' '}
+              </span>
+            )}
             {/*
               We store the first 3000 characters of an ad, which is the whole
               thing for most and the bulk of it for the longest. Saying so is
