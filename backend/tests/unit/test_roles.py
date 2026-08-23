@@ -388,3 +388,63 @@ def test_log_roles_flags_jobs_the_ai_gave_no_label_at_all(capsys):
 
     output = capsys.readouterr().out
     assert "gave no role label at all" in output
+
+
+# ─── Titles F1 accepts that this module used to have no answer for ──────────
+# Read off a live run's "doubtful drops" list. F1 keeps a job when the AI's
+# role label matches its accept list; this module only reads the ad. Where
+# they disagree the scope screen drops the job, so a title F1 calls tech and
+# this module cannot name is a job quietly thrown away.
+
+def test_a_software_quality_analyst_is_qa_not_nothing():
+    """
+    Off run 137's doubtful list. F1 kept it as a tech analyst, this module
+    named no track, and the scope screen threw a QA job away.
+    """
+    role, source = classify_role("Software Quality Analyst", "")
+    assert role == QA
+    assert source == "title"
+
+
+@pytest.mark.parametrize("title", [
+    "Quality Analyst",
+    "Quality Controller",
+    "Product Quality Controller",
+    "Quality Assurer",
+])
+def test_quality_without_a_software_word_is_not_qa(title):
+    """
+    The first version of the rule above allowed "product" and "controller"
+    and promptly claimed a factory floor. A bare quality role is as often
+    manufacturing as it is a test team, so the software word has to be there.
+    """
+    assert classify_role(title, "")[0] == ""
+
+
+def test_data_analytics_is_a_data_job():
+    """
+    "Graduate Intern: Data Analytics" appeared twice on the live board with
+    no track at all -- the rule read "data analyst" and analytics is not
+    analyst.
+    """
+    assert classify_role("Graduate Intern: Data Analytics", "")[0] == DATA
+    assert classify_role("Data Analytics Specialist", "")[0] == DATA
+
+
+def test_the_run_log_lists_the_titles_it_could_not_name(capsys):
+    """
+    The durable half of the fix. Most of this disagreement is F1 being loose
+    rather than this module being narrow, so it is printed for review rather
+    than designed away.
+    """
+    jobs = apply_roles([
+        make_job("Junior Software Developer"),
+        make_job("ESG Country Analyst"),
+        make_job("Cancellation & Retention Specialist"),
+    ])
+    log_roles(jobs)
+
+    output = capsys.readouterr().out
+    assert "could not name a track for" in output
+    assert "ESG Country Analyst" in output
+    assert "Junior Software Developer" not in output.split("could not name")[1]

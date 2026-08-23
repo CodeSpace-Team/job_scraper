@@ -7,8 +7,9 @@ The tool builds the sheets a person fills in by hand, so most of it is
 formatting and there is not much to get wrong. Two things are worth pinning
 down properly:
 
-1. **Working out which jobs were kept.** No run saves that list. It is the
-   leveled file minus the excluded file, matched by web address, and if that
+1. **Working out which jobs were kept.** The run now saves that list
+   (board_jobs.json), but older runs did not, and for those it is the
+   leveled file minus the excluded file, matched by web address. If that
    subtraction is wrong then F1's non-tech rate is measured over the wrong
    population entirely -- including, at worst, the very jobs F1 dropped.
 
@@ -284,3 +285,20 @@ def test_a_sheet_where_everything_is_clear_says_nothing_about_looking():
     report = build_tech_report(jobs, total_jobs=100, source_file="x")
 
     assert "Open the advert" not in report
+
+
+# ─── Which file the review is drawn from ────────────────────────────────────
+
+def test_the_level_review_samples_the_board_by_default():
+    """
+    It used to sample combined_jobs_leveled.json -- every job the run
+    touched. On run 137 that put a Wakeboarding Crew instructor, a Physics
+    teacher and a Medical Officer into a twenty-job review: fifteen of the
+    twenty were jobs nobody would ever be shown. A review pass is somebody
+    reading twenty adverts by hand, and it belongs on the jobs a graduate
+    actually sees.
+    """
+    from src.pipeline.qa import DEFAULT_INPUT, FALLBACK_INPUT
+
+    assert DEFAULT_INPUT.endswith("board_jobs.json")
+    assert FALLBACK_INPUT.endswith("combined_jobs_leveled.json")
