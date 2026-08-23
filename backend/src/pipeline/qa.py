@@ -58,8 +58,24 @@ from src.utils import load_jobs, log
 
 # ─── Constants ──────────────────────────────────────────────────────────────
 
-DEFAULT_INPUT = "data/cache/combined_jobs_leveled.json"
-"""The file the daily run leaves behind after levels are worked out."""
+DEFAULT_INPUT = "data/cache/board_jobs.json"
+"""
+The jobs that actually reached the board.
+
+It used to be combined_jobs_leveled.json -- every job the run touched,
+before screening. On a real run that meant a sample of twenty drawn from
+642, of which fifteen were a Wakeboarding Crew instructor, a Physics
+teacher and a Medical Officer: jobs nobody was ever going to see. A review
+pass is somebody reading twenty adverts by hand, and it should be spent on
+the jobs a graduate will actually be shown.
+
+Pass ``-i data/cache/combined_jobs_leveled.json`` to go back to sampling
+everything, which is still the right file when the question is how well F2
+levels in general rather than how good the board is.
+"""
+
+FALLBACK_INPUT = "data/cache/combined_jobs_leveled.json"
+"""Where to look when a run predates board_jobs.json."""
 
 DEFAULT_SIZE = 20
 """The sample size the brief asks for."""
@@ -471,6 +487,17 @@ Examples:
     args = parser.parse_args()
 
     input_path = Path(args.input)
+
+    # A run from before board_jobs.json existed still has the leveled file,
+    # and a review of the wrong twenty jobs beats no review at all.
+    if not input_path.exists() and args.input == DEFAULT_INPUT:
+        fallback = Path(FALLBACK_INPUT)
+        if fallback.exists():
+            log(f"{input_path} not found -- this run predates it.")
+            log(f"Falling back to {fallback}, which samples every job the run")
+            log("touched rather than only the ones that reached the board.")
+            input_path = fallback
+
     if not input_path.exists():
         log(f"ERROR: {input_path} not found.")
         log("Run the pipeline first, or point at a different file with -i.")
