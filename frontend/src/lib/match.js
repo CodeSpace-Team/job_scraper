@@ -181,6 +181,121 @@ export function matchJobs(jobs, criteria = EMPTY_CRITERIA) {
   })
 }
 
+// ─── Finding those skills inside the advert ────────────────────────────────
+
+const NEVER_ALONE = new Set(['Go', 'R', 'C'])
+/**
+ * Skill names too common as ordinary words to highlight on their own.
+ *
+ * The pipeline's own skills list refuses to match "Go" bare for the same
+ * reason -- "go the extra mile", "go-getters who close deals" -- and a
+ * highlight is worse than a missed match here, because a page speckled with
+ * yellow on every "go" teaches a student to ignore the yellow.
+ */
+
+const PUNCTUATED = /[^A-Za-z0-9]/
+const ACRONYM = /^[A-Z0-9]{2,}$/
+
+/**
+ * Turn canonical skill names into the words to look for in an advert.
+ *
+ * The names are canonical, and adverts are not: a job that wants Postgres
+ * says "Postgres", not "SQL (MySQL/Postgres)". The names bundle their own
+ * aliases with slashes, ampersands and brackets, so most of what is needed
+ * is already in them.
+ *
+ *     SQL (MySQL/Postgres)  ->  SQL (MySQL/Postgres), SQL, MySQL, Postgres
+ *     C#/.NET               ->  C#/.NET, C#, .NET
+ *     Excel (Advanced)      ->  Excel (Advanced), Excel
+ *     CI/CD                 ->  CI/CD
+ *
+ * Two things get dropped. A bracketed part that reads as an ordinary word
+ * ("Advanced") rather than a name ("GCP"), and any part of two letters or
+ * fewer that is all letters -- which is why CI/CD and UI/UX stay whole
+ * instead of lighting up every "CI" and "UX" in the page.
+ *
+ * @returns {string[]} longest first, so "MySQL" wins over "SQL".
+ */
+export function highlightTerms(skills) {
+  const terms = new Set()
+
+  for (const skill of skills || []) {
+    const name = String(skill).trim()
+    if (!name) continue
+    if (NEVER_ALONE.has(name)) continue
+
+    terms.add(name)
+
+    const bracketed = name.match(/\(([^)]+)\)/)
+    const withoutBrackets = name.replace(/\s*\([^)]*\)/g, '').trim()
+
+    const parts = withoutBrackets.split(/[/&]/)
+    if (bracketed) {
+      const inside = bracketed[1]
+      // "GCP" is worth finding; "Advanced" is a word that happens to be
+      // in brackets and would light up half the adverts on the board.
+      if (ACRONYM.test(inside) || inside.includes('/')) {
+        parts.push(...inside.split('/'))
+      }
+    }
+
+    for (const raw of parts) {
+      const part = raw.trim()
+      if (!part) continue
+      if (part.length <= 2 && !PUNCTUATED.test(part)) continue
+      if (NEVER_ALONE.has(part)) continue
+      terms.add(part)
+    }
+  }
+
+  return [...terms].sort((a, b) => b.length - a.length)
+}
+
+function escapeForRegex(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Split text into runs, marking the ones that name a skill.
+ *
+ * Boundaries are checked against letters and digits rather than with \b,
+ * because \b does nothing useful at the edges of "C++", "C#" or ".NET".
+ * Matching "SQL" must not light up the middle of "MySQL", and this is what
+ * stops it.
+ *
+ * @returns {{text: string, hit: boolean}[]}
+ */
+export function splitOnTerms(text, terms) {
+  const source = String(text || '')
+  if (!source || !terms || terms.length === 0) {
+    return source ? [{ text: source, hit: false }] : []
+  }
+
+  const pattern = new RegExp(
+    `(?<![A-Za-z0-9])(${terms.map(escapeForRegex).join('|')})(?![A-Za-z0-9])`,
+    'gi',
+  )
+
+  const runs = []
+  let cursor = 0
+  let match
+
+  while ((match = pattern.exec(source)) !== null) {
+    if (match.index > cursor) {
+      runs.push({ text: source.slice(cursor, match.index), hit: false })
+    }
+    runs.push({ text: match[0], hit: true })
+    cursor = match.index + match[0].length
+  }
+
+  if (cursor < source.length) {
+    runs.push({ text: source.slice(cursor), hit: false })
+  }
+
+  return runs
+}
+
+
 /**
  * True once a student has told us enough to search on.
  *

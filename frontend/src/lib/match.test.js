@@ -13,10 +13,12 @@ import {
   YEARS_CEILING,
   canSearch,
   ceilingFor,
+  highlightTerms,
   matchJobs,
   matchesLevel,
   matchesTrack,
   skillOverlap,
+  splitOnTerms,
 } from './match.js'
 
 function job(overrides = {}) {
@@ -173,5 +175,82 @@ describe('canSearch', () => {
 
   it('is not satisfied by nothing', () => {
     expect(canSearch({ roleTypes: [], levels: [], skills: [] })).toBe(false)
+  })
+})
+
+describe('highlightTerms', () => {
+  it('unpacks the aliases the canonical names already carry', () => {
+    expect(highlightTerms(['SQL (MySQL/Postgres)']))
+      .toEqual(expect.arrayContaining(['SQL', 'MySQL', 'Postgres']))
+  })
+
+  it('keeps a bracketed acronym but drops a bracketed word', () => {
+    expect(highlightTerms(['Google Cloud (GCP)'])).toContain('GCP')
+    expect(highlightTerms(['Excel (Advanced)'])).not.toContain('Advanced')
+    expect(highlightTerms(['Excel (Advanced)'])).toContain('Excel')
+  })
+
+  it('leaves two-letter halves alone so CI/CD and UI/UX stay whole', () => {
+    const terms = highlightTerms(['CI/CD', 'UI/UX'])
+    expect(terms).toEqual(expect.arrayContaining(['CI/CD', 'UI/UX']))
+    expect(terms).not.toContain('CI')
+    expect(terms).not.toContain('UX')
+  })
+
+  it('keeps short names that carry punctuation', () => {
+    expect(highlightTerms(['C#/.NET'])).toEqual(expect.arrayContaining(['C#', '.NET']))
+    expect(highlightTerms(['C++'])).toContain('C++')
+  })
+
+  it('never highlights Go', () => {
+    // The pipeline's own skills list refuses to match it bare for the same
+    // reason: "go the extra mile" would light up half the adverts, and a
+    // page speckled with yellow teaches a student to ignore the yellow.
+    expect(highlightTerms(['Go'])).toEqual([])
+  })
+
+  it('puts the longest term first, so MySQL wins over SQL', () => {
+    const terms = highlightTerms(['SQL (MySQL/Postgres)'])
+    expect(terms.indexOf('MySQL')).toBeLessThan(terms.indexOf('SQL'))
+  })
+})
+
+describe('splitOnTerms', () => {
+  const terms = highlightTerms(['SQL (MySQL/Postgres)', 'Java', 'C#/.NET', 'React'])
+
+  const render = (text) =>
+    splitOnTerms(text, terms).map((r) => (r.hit ? `[${r.text}]` : r.text)).join('')
+
+  it('marks the skills and leaves the rest alone', () => {
+    expect(render('We use Java and React here.')).toBe('We use [Java] and [React] here.')
+  })
+
+  it('does not light up a word that merely contains one', () => {
+    expect(render('Java, not JavaScript')).toBe('[Java], not JavaScript')
+    expect(render('MySQLdb is not SQLite')).toBe('MySQLdb is not SQLite')
+  })
+
+  it('matches names that start or end in punctuation', () => {
+    expect(render('C# on .NET')).toBe('[C#] on [.NET]')
+  })
+
+  it('is case-insensitive, and keeps the advert\'s own casing', () => {
+    expect(render('we use JAVA')).toBe('we use [JAVA]')
+  })
+
+  it('loses no text at all', () => {
+    const text = 'Java and React and nothing else in particular.'
+    expect(splitOnTerms(text, terms).map((r) => r.text).join('')).toBe(text)
+  })
+
+  it('returns the text untouched when nothing was picked', () => {
+    expect(splitOnTerms('Some advert text', [])).toEqual([
+      { text: 'Some advert text', hit: false },
+    ])
+  })
+
+  it('is safe on nothing at all', () => {
+    expect(splitOnTerms('', terms)).toEqual([])
+    expect(splitOnTerms(null, terms)).toEqual([])
   })
 })
