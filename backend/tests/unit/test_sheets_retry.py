@@ -33,6 +33,7 @@ from unittest.mock import MagicMock
 
 import gspread
 import pytest
+import requests
 
 from src.writers.sheets import _open_spreadsheet, write_exclude_tab, write_to_sheet
 
@@ -252,3 +253,61 @@ def test_write_exclude_tab_raises_instead_of_exiting_on_missing_creds(monkeypatc
 
     with pytest.raises(RuntimeError, match="GOOGLE_SHEETS_CREDS"):
         write_exclude_tab([{"title": "Mining Engineer"}], "sheet-id")
+
+# ─── The exception that actually arrives ────────────────────────────────────
+
+def requests_connection_reset():
+    """
+    The real thing, as gspread raises it.
+
+    gspread talks to Google through requests, so a dropped connection arrives
+    as requests.exceptions.ConnectionError -- which is a *sibling* of the
+    builtin, not a subclass:
+
+        requests.exceptions.ConnectionError -> RequestException -> OSError
+        builtin ConnectionError                                 -> OSError
+
+    The test above uses ConnectionResetError, which is a builtin and was
+    caught all along. That is why this gap survived: the test proved the
+    retry worked on an exception the code never sees.
+    """
+    return requests.exceptions.ConnectionError(
+        "('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))"
+    )
+
+
+def test_the_connection_error_gspread_actually_raises_is_retried(monkeypatch):
+    """
+    Run 142, 28 August. The first call to Google came back "Connection
+    aborted", the decorator did not catch it, and the run failed in the same
+    second it started -- no delay, no second attempt. The Exclude tab wrote
+    successfully three seconds later, so one retry would have saved it.
+    """
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    client = MagicMock()
+    client.open_by_key.side_effect = [
+        requests_connection_reset(),
+        "the spreadsheet",
+    ]
+
+    result = _open_spreadsheet(client, "sheet-id")
+
+    assert result == "the spreadsheet"
+    assert client.open_by_key.call_count == 2
+
+
+@pytest.mark.parametrize("error", [
+    requests.exceptions.ConnectionError("connection aborted"),
+    requests.exceptions.Timeout("read timed out"),
+    requests.exceptions.ChunkedEncodingError("connection broken"),
+])
+def test_every_network_failure_requests_can_raise_is_retried(error, monkeypatch):
+    """Connection resets are not the only way a request dies mid-flight."""
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    client = MagicMock()
+    client.open_by_key.side_effect = [error, "the spreadsheet"]
+
+    assert _open_spreadsheet(client, "sheet-id") == "the spreadsheet"
+    assert client.open_by_key.call_count == 2
