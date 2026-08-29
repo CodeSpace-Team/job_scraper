@@ -1093,3 +1093,65 @@ It now samples `board_jobs.json`. `-i data/cache/combined_jobs_leveled.json` sti
 | `src/pipeline/qa.py` | Level review samples the board by default |
 
 ---
+
+## Run 142 — a red X, and a run that arrived at eight in the evening
+
+### The failure: a name collision cost a whole run
+
+Run 142 ended with exit code 1. The reason in the log:
+
+```
+[18:29:09] ✗ Sheets write error: Could not open spreadsheet:
+           ('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))
+[18:29:09] Saved 83 jobs to data/cache/combined_jobs_fallback.json
+```
+
+Both lines carry the same timestamp, and that is the whole story. Opening the spreadsheet is wrapped in a retry with `tries=4, delay=3.0, backoff=2.0` — a real retry would have taken twenty-one seconds. It failed in the same second it started, so the retry never fired.
+
+Why it never fired:
+
+```
+requests.exceptions.ConnectionError  ->  RequestException  ->  OSError
+builtin ConnectionError                                    ->  OSError
+```
+
+**They are siblings, not parent and child.** gspread talks to Google through requests and raises requests' version; the decorator caught the builtin. The `except` clause read as though it covered a dropped connection and covered nothing at all.
+
+The Exclude tab wrote successfully three seconds later, on the same credentials to the same spreadsheet, so this was a transient blip and a single retry would have saved the run.
+
+**Why the tests did not catch it.** `test_a_dropped_connection_is_retried` raises `ConnectionResetError` — a builtin, and a genuine subclass of the builtin `ConnectionError`. It passed for weeks while proving the retry worked on an exception the code never sees. The new test raises what gspread actually raises, and fails against the old tuple.
+
+The fix catches `requests.exceptions.RequestException` — the whole family: connection resets, timeouts, DNS failures, chunked-encoding errors. The builtins stay, since a plain socket error can still surface from lower down.
+
+### Everything else in that run worked
+
+Worth recording, because the log looks alarming and mostly is not. The Anthropic workspace hit its usage limit, so all 133 enrichment batches failed — every job went through with no AI role label at all. The pipeline still put 83 jobs on the board, because F1 falls back to the title and F7 only ever reads the ad. The board published, the Exclude tab wrote, the artifact uploaded. One phase of five failed and the run still delivered.
+
+### The run that arrived at eight in the evening
+
+The schedule was `0 6 * * *` — 08:00 South Africa. What actually happened:
+
+| Run | Started (SAST) | Late by |
+| :--- | :--- | ---: |
+| 23 Aug | 08:34 | 34m |
+| 24 Aug | 08:50 | 50m |
+| 25 Aug | 08:39 | 39m |
+| 26 Aug | 08:40 | 40m |
+| 27 Aug | **19:16** | **11h 16m** |
+| 28 Aug | **20:08** | **12h 08m** |
+
+GitHub queues scheduled workflows on a best-effort basis and delays them under load — and the heaviest load is the top of every hour, which is exactly where this sat. The 34-to-50-minute baseline was that contention all along; the two evening runs were the same mechanism on a bad day.
+
+Moved to `37 4 * * *` — 06:37 SAST. An odd minute avoids the stampede, and starting earlier means an hour or two of queueing still lands before the working day.
+
+**This buys margin, not a guarantee.** GitHub promises no accuracy on schedules and may drop a scheduled run entirely. If the run ever has to be reliably early, it needs an external trigger calling `workflow_dispatch` rather than a cron in the workflow.
+
+### Files
+
+| File | What it does |
+| :--- | :--- |
+| `src/writers/sheets.py` | Retries the connection error gspread actually raises |
+| `tests/unit/test_sheets_retry.py` | The real exception, and the rest of the requests family |
+| `.github/workflows/daily-scrape.yml` | Off the hour, and earlier |
+
+---
