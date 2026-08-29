@@ -66,6 +66,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple, Union
 
+import requests
+
 from src.pipeline.dedupe import is_comparable, key_from_row, duplicate_key
 from src.utils import log, retry
 
@@ -398,8 +400,32 @@ def _is_retryable_sheets_error(error: BaseException) -> bool:
     return status in RETRYABLE_API_STATUSES
 
 
+# requests.exceptions.RequestException, not the builtin ConnectionError, and
+# the difference cost a whole run.
+#
+# gspread talks to Google through requests, and requests raises its own
+# ConnectionError -- which is a *sibling* of the builtin one, not a subclass:
+#
+#     requests.exceptions.ConnectionError -> RequestException -> OSError
+#     builtin ConnectionError                                 -> OSError
+#
+# So `exceptions=(ConnectionError, ...)` read as though it covered a dropped
+# connection and covered nothing. On 28 August the first call to Google came
+# back "Connection aborted, Connection reset by peer", this decorator did not
+# catch it, and the run failed in the same second it started -- no delay, no
+# second attempt. The Exclude tab wrote successfully three seconds later, so
+# a single retry would have saved it.
+#
+# RequestException is the whole family: connection resets, timeouts, DNS
+# failures, chunked-encoding errors. The builtins stay because a plain socket
+# error can still surface from lower down.
 @retry(
-    exceptions=(ConnectionError, TimeoutError, gspread.exceptions.APIError),
+    exceptions=(
+        requests.exceptions.RequestException,
+        ConnectionError,
+        TimeoutError,
+        gspread.exceptions.APIError,
+    ),
     tries=4,
     delay=3.0,
     backoff=2.0,
