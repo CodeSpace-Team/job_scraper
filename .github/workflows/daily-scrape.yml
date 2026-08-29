@@ -2,8 +2,27 @@ name: Daily Job Scraper
 
 on:
   schedule:
-    - cron: '0 6 * * *'
-  
+    # 04:37 UTC = 06:37 South Africa. Deliberately not on the hour.
+    #
+    # GitHub queues scheduled workflows on a best-effort basis and delays them
+    # under load, and the heaviest load is the top of every hour -- which is
+    # exactly where '0 6 * * *' sat. Even on a good day it cost 34-50 minutes,
+    # and twice it cost half a day:
+    #
+    #     23 Aug  08:34  (34m late)      27 Aug  19:16  (11h 16m late)
+    #     24 Aug  08:50  (50m late)      28 Aug  20:08  (12h 08m late)
+    #     25 Aug  08:39  (39m late)
+    #     26 Aug  08:40  (40m late)
+    #
+    # An odd minute avoids the stampede, and starting earlier means an hour or
+    # two of queueing still lands the run before the working day.
+    #
+    # This buys margin, not a guarantee. GitHub promises no accuracy on
+    # schedules and may drop a scheduled run entirely. If the run ever has to
+    # be reliably early, it needs an external trigger calling workflow_dispatch
+    # rather than a cron in here.
+    - cron: '37 4 * * *'
+
   workflow_dispatch:
     inputs:
       skip_linkedin:
