@@ -286,6 +286,68 @@ describe('App', () => {
     expect(within(form).queryByRole('checkbox', { name: /Communication/ })).not.toBeInTheDocument()
     expect(within(form).queryByRole('checkbox', { name: /Documentation/ })).not.toBeInTheDocument()
   })
+
+  it('offers the three levels the appendix names, and not "unknown"', async () => {
+    /*
+     * "unknown" is on 62 of the 114 jobs on a live board, and it is not a
+     * level anybody is at -- it is the board admitting the advert said
+     * nothing. Offering it as a checkbox would ask a student to describe
+     * themselves in a word that describes our data instead.
+     *
+     * Those jobs are not lost: an advert that states no years cannot be
+     * ruled out on level, so they come back whatever is ticked, marked as
+     * unstated so the student knows to read before applying.
+     */
+    mockJobs([
+      { ...SAMPLE_JOBS[0], job_level: 'junior' },
+      { ...SAMPLE_JOBS[1], job_level: 'mid' },
+      { ...SAMPLE_JOBS[1], job_level: 'unknown', job_url: 'https://example.com/3' },
+    ])
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    const form = screen.getByRole('form', { name: /Find jobs/i })
+    expect(within(form).getByRole('checkbox', { name: /junior/ })).toBeInTheDocument()
+    expect(within(form).getByRole('checkbox', { name: /^mid/ })).toBeInTheDocument()
+    expect(within(form).queryByRole('checkbox', { name: /unknown/ })).not.toBeInTheDocument()
+  })
+
+  it('shows what CodeSpace teaches before what the market asks for', async () => {
+    /*
+     * The picker used to be ordered purely by how often a skill appears in
+     * the adverts, which put the analyst end of the board on top: SQL is the
+     * single most-requested skill and Stakeholder Management outranks
+     * HTML/CSS. A student opening the page saw a list of skills they mostly
+     * did not have, with their own below a fold they had to search past.
+     */
+    mockJobs([
+      { ...SAMPLE_JOBS[0], must_have_skills: 'SQL (MySQL/Postgres), Stakeholder Management' },
+      { ...SAMPLE_JOBS[1], must_have_skills: 'SQL (MySQL/Postgres), HTML/CSS' },
+    ])
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/jobs open right now/)).toBeInTheDocument())
+
+    const form = screen.getByRole('form', { name: /Find jobs/i })
+    const offered = within(form)
+      .getAllByRole('checkbox')
+      .map((box) => box.closest('label').textContent)
+
+    // Taught skills lead, in the order the course teaches them, even though
+    // SQL is asked for twice as often as HTML/CSS.
+    expect(offered.indexOf('HTML/CSS')).toBeLessThan(offered.indexOf('SQL (MySQL/Postgres)'))
+
+    // And a skill nobody here was taught is not in the opening list at all.
+    // It is still on the board, and still reachable -- by a student who goes
+    // looking for it, which is the only student it is any use to.
+    expect(offered).not.toContain('Stakeholder Management')
+
+    await userEvent.type(within(form).getByLabelText(/Find a skill/i), 'stake')
+    expect(within(form).getByRole('checkbox', { name: /Stakeholder Management/ }))
+      .toBeInTheDocument()
+  })
+
   it('highlights the student\'s own skills inside the advert', async () => {
     /*
      * The point of the description panel is that a student does not have to
