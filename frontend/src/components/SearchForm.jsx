@@ -1,25 +1,26 @@
 import { useState } from 'react'
-import { ENTRY, JUNIOR, canSearch } from '../lib/match.js'
+import { ENTRY, JUNIOR, MID, canSearch } from '../lib/match.js'
 
 const MAX_OPTIONS_SHOWN = 20
 
 const LEVEL_HELP = {
   [ENTRY]: 'No commercial experience yet — ads asking up to a year',
-  [JUNIOR]: 'Up to three years in — ads asking up to three',
+  [JUNIOR]: 'Your first couple of years — ads asking up to two',
+  [MID]: 'Two to four years in — ads asking up to four',
 }
 
 function toggle(list, value) {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
 }
 
-function Group({ title, hint, options, selected, onChange, findLabel, help }) {
+function Group({ title, hint, options, selected, onChange, findLabel, help, shown }) {
   const [search, setSearch] = useState('')
 
   if (options.length === 0) return null
 
   const visible = findLabel && search.trim()
     ? options.filter((o) => o.toLowerCase().includes(search.trim().toLowerCase()))
-    : options.slice(0, MAX_OPTIONS_SHOWN)
+    : options.slice(0, shown || MAX_OPTIONS_SHOWN)
 
   return (
     <fieldset className="border-t border-neutral-200 pt-4 first:border-t-0 first:pt-0">
@@ -105,6 +106,9 @@ export default function SearchForm({ facets, criteria, onChange, onSearch, resul
         selected={criteria.skills}
         onChange={set('skills')}
         findLabel="Find a skill..."
+        // Everything CodeSpace teaches that some advert asks for, all of it.
+        // Anything else an advert wants is still here, behind the search box.
+        shown={facets.taughtSkillCount}
       />
 
       <div className="space-y-2 border-t border-neutral-200 pt-4">
