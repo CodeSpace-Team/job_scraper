@@ -4,7 +4,8 @@ import SearchBar from './components/SearchBar.jsx'
 import SearchForm from './components/SearchForm.jsx'
 import { useJobs } from './hooks/useJobs.js'
 import { extractFacets, matchesSearch } from './lib/filters.js'
-import { EMPTY_CRITERIA, matchJobs } from './lib/match.js'
+import { orderForGraduates } from './lib/graduate.js'
+import { EMPTY_CRITERIA, ENTRY, JUNIOR, MID, matchJobs } from './lib/match.js'
 import { DEFAULT_SORT, SORT_OPTIONS, sortJobs } from './lib/sort.js'
 
 /**
@@ -16,6 +17,9 @@ import { DEFAULT_SORT, SORT_OPTIONS, sortJobs } from './lib/sort.js'
  * mentions Documentation. Git, Agile/Jira and Code Review are deliberately
  * not here: those are real things somebody has or has not done.
  */
+/** The levels CodeSpace's appendix names, and the only ones offered. */
+const APPENDIX_LEVELS = new Set([ENTRY, JUNIOR, MID])
+
 const NOT_A_TECH_SKILL = new Set([
   'Problem Solving',
   'Communication',
@@ -41,10 +45,24 @@ export default function App() {
 
   const facets = useMemo(() => {
     const found = extractFacets(jobs)
+    // extractFacets orders skills by how often the adverts ask for them.
+    // That is the market's ranking, not the student's; orderForGraduates
+    // puts what CodeSpace teaches at the top and reports how many of those
+    // there are, so the picker can show all of them rather than a fixed
+    // twenty that cuts the list in half.
+    const { ordered, taughtCount } = orderForGraduates(
+      found.skills.filter((s) => !NOT_A_TECH_SKILL.has(s)),
+    )
     return {
       ...found,
-      levels: found.levels.filter((l) => l === 'entry level' || l === 'junior'),
-      skills: found.skills.filter((s) => !NOT_A_TECH_SKILL.has(s)),
+      // The three levels the appendix names. 'unknown' is deliberately not
+      // offered: it is not a level somebody is at, it is the board admitting
+      // an advert said nothing. Those jobs still come back -- matchesLevel
+      // cannot rule out an advert that states no years -- and the card marks
+      // them as unstated so the student knows to read before applying.
+      levels: found.levels.filter((l) => APPENDIX_LEVELS.has(l)),
+      skills: ordered,
+      taughtSkillCount: taughtCount,
     }
   }, [jobs])
 
