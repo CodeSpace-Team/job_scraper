@@ -41,6 +41,7 @@ import { jobSkills } from './filters.js'
 
 export const ENTRY = 'entry level'
 export const JUNIOR = 'junior'
+export const MID = 'mid'
 
 export const EMPTY_CRITERIA = {
   roleTypes: [],
@@ -51,13 +52,26 @@ export const EMPTY_CRITERIA = {
 /**
  * The most years an ad can ask for and still suit somebody at this level.
  *
- * Read off what the ad states, not what it calls itself. Entry level means
- * no real experience yet, so one year is the outside edge; junior covers the
- * first three, which is the cohort the whole tool is built for.
+ * Read off what the ad states, not what it calls itself. Straight from the
+ * appendix: entry level means no prior work experience, junior is 0-2 years
+ * and mid is 2-4.
+ *
+ * Junior is two, not three. The pipeline has always agreed with the appendix
+ * -- levels.level_from_years puts 1-2 in junior and 3-4 in mid -- and this
+ * ceiling was the one place in the project that said three, which meant an
+ * advert the pipeline had labelled mid came back to a student who had asked
+ * for junior work.
+ *
+ * Mid is on the list because the appendix lists it, and it is a real choice
+ * a student can make rather than a widening of the other two: somebody two
+ * years in ticks mid and sees four-year adverts, somebody fresh ticks entry
+ * and does not. Whoever ticks it is told what they are looking at -- the
+ * card still says how many years the advert asks for.
  */
 export const YEARS_CEILING = {
   [ENTRY]: 1,
-  [JUNIOR]: 3,
+  [JUNIOR]: 2,
+  [MID]: 4,
 }
 
 /** Why a job came back. Shown on the card, so a match is never a black box. */
