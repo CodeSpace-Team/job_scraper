@@ -271,7 +271,7 @@ def cohort_day():
         (full_ad("Flutter Developer",
                  "Build apps for our clients. Modern stack."), STRETCH),
         (full_ad("Service Desk Agent",
-                 "Log and resolve tickets. Full training provided."), OUT),
+                 "Log and resolve tickets. Full training provided."), STRETCH),
         (full_ad("Senior Backend Engineer",
                  "Minimum of 6 years building distributed systems."), OUT),
         (full_ad("Snr .NET Developer",
@@ -281,7 +281,7 @@ def cohort_day():
         (full_ad("Principal Engineer",
                  "Set technical direction across the group."), OUT),
         (full_ad("DevOps Engineer",
-                 "Minimum 4 years experience with Kubernetes."), OUT),
+                 "Minimum 4 years experience with Kubernetes."), STRETCH),
         (full_ad("Cloud Engineer",
                  "You will have 5+ years experience with AWS."), OUT),
     ]
@@ -320,7 +320,7 @@ def test_no_senior_lead_or_principal_reaches_the_sheet(screened):
         assert job["job_level"] not in {"senior", "lead", "principal"}
 
 
-def test_no_job_asking_four_or_more_years_reaches_the_sheet(screened):
+def test_no_job_asking_five_or_more_years_reaches_the_sheet(screened):
     kept, _excluded, _counts = screened
     for job in kept:
         years = job.get("experience_years")
@@ -351,16 +351,44 @@ def test_an_ad_asking_three_years_is_a_stretch_not_a_drop(screened):
     assert job["experience_years"] == 3
 
 
-def test_an_off_track_job_still_does_not_reach_the_sheet(screened):
+def test_a_track_the_appendix_names_now_reaches_the_sheet(screened):
     """
-    Widening the tiers is not widening the scope. A service desk agent is a
-    perfectly good junior job and still not where this course leads.
-    """
-    kept, excluded, _counts = screened
-    assert "Service Desk Agent" not in {job["title"] for job in kept}
+    The scope change, on a real ad.
 
-    dropped = next(j for j in excluded if j["title"] == "Service Desk Agent")
-    assert dropped["excluded_stage"] == STAGE_OFF_TRACK
+    A service desk agent was filed under "scope off track" every day, on the
+    reasoning that a service desk leads to infrastructure rather than
+    development. CodeSpace's appendix names technical support as one of the
+    seven tracks its graduates are positioned for, and CodeSpace is the
+    authority on where its own graduates end up.
+
+    It arrives as a stretch rather than an apply, which is the honest label:
+    the ad says nothing at all about level.
+    """
+    kept, _excluded, _counts = screened
+
+    job = next(j for j in kept if j["title"] == "Service Desk Agent")
+    assert job["role_type"] == "Technical Support"
+    assert job["tier"] == TIER_STRETCH
+
+
+def test_the_scope_screen_still_guards_the_sheet():
+    """
+    Every tech track the appendix names now ships, so the scope screen no
+    longer catches a service desk agent. That is not the same as it having
+    stopped mattering: it is what keeps work nobody could place on a track
+    off the sheet, and what any future narrowing would run through.
+    """
+    _kept, excluded, _counts = screen_jobs([{
+        "title": "Junior Software Developer",
+        "primary_role": "Developer",
+        "job_url": "u/off-track",
+        "job_level": "junior",
+        "level_source": "title",
+        "role_type": "Infrastructure",
+        "role_source": "title",
+    }])
+
+    assert excluded[0]["excluded_stage"] == STAGE_OFF_TRACK
 
 
 def test_every_f4_drop_explains_itself(screened):
