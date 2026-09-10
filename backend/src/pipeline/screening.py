@@ -94,7 +94,16 @@ import re
 from typing import Any, Dict, List, Sequence, Tuple
 
 from src.pipeline.levels import ENTRY, JUNIOR, MID, UNKNOWN
-from src.pipeline.roles import BUSINESS_ANALYSIS, DATA, MOBILE, QA, SOFTWARE
+from src.pipeline.roles import (
+    BUSINESS_ANALYSIS,
+    DATA,
+    DEVOPS,
+    MOBILE,
+    QA,
+    SECURITY,
+    SOFTWARE,
+    SUPPORT,
+)
 from src.utils import log
 
 
@@ -109,8 +118,16 @@ STAGE_OFF_TRACK = "scope off track"
 STAGE_ABOVE_COHORT = "F4 above cohort"
 """Label written to the Exclude tab's Stage column by the F4 screen."""
 
-MAX_YEARS_FOR_COHORT = 4
-"""An ad asking for this many years or more is above our graduates (F4)."""
+MAX_YEARS_FOR_COHORT = 5
+"""
+An ad asking for this many years or more is above our graduates (F4).
+
+Five, because the appendix puts mid at 2-4 years and mid is in scope. This
+was 4, which cut the top year off the highest level being published: an ad
+asking for exactly four years was dropped as above-cohort while the level
+labelled from that same figure was ``mid`` and allowed. The boundary now
+sits where the appendix puts it.
+"""
 
 MAX_YEARS_FOR_APPLY = 2
 """Above this, an ad is a stretch rather than a straightforward apply."""
@@ -131,21 +148,34 @@ not state a level is the single most common case in the data; silence is
 not evidence that a job is out of reach.
 """
 
-PUBLISHED_ROLE_TYPES = frozenset({SOFTWARE, MOBILE, QA, BUSINESS_ANALYSIS, DATA})
+PUBLISHED_ROLE_TYPES = frozenset({
+    SOFTWARE, SUPPORT, DEVOPS, QA, BUSINESS_ANALYSIS, MOBILE, SECURITY, DATA,
+})
 """
 The tracks that reach the sheet and the board.
 
-Core is software and mobile -- what CodeSpace teaches. The other three are
-adjacent: jobs a graduate who can build things plausibly takes first, on a
-different set of tools. Data & BI is in for exactly that reason, and its
-absence from the role taxonomy is why *Junior Data Analyst* used to come out
-of F7 with no track at all.
+The seven from CodeSpace's appendix, which names them as the tracks its
+graduates are positioned for, plus Data & BI.
 
-Deliberately out: technical support, security, DevOps/cloud. All genuinely
-technical, none of them the work this course leads to -- a service desk
-leads to infrastructure, not development. They are still scraped, enriched
-and classified, and filed on the Exclude tab under this stage, so widening
-the scope is a name in this set and a re-run.
+This set was narrower for a while: software, mobile, QA, business analysis
+and data, on the reasoning that a service desk leads to infrastructure
+rather than development. The appendix settles it the other way -- technical
+support, DevOps/cloud and security are all listed as destinations the course
+prepares people for, and CodeSpace is the authority on where its own
+graduates end up. Everything in those three tracks was already being
+scraped, enriched and classified; it was reaching the Exclude tab under
+``STAGE_OFF_TRACK`` and going no further.
+
+``Data & BI`` is the one name here the appendix does not list, and it is
+kept deliberately. It was added after a live board showed 24 of 29 data jobs
+coming out of F7 with no track at all -- a *Junior Data Analyst* that a
+graduate who writes SQL and Python is a plausible candidate for. Dropping it
+would take those jobs off the board, which is a deletion rather than the
+widening the appendix asks for. Remove the name here if CodeSpace would
+rather it went.
+
+Nothing else guards the sheet or the board, so scope is this set and a
+re-run.
 """
 
 PUBLISHED_LEVELS = frozenset({ENTRY, JUNIOR, MID, UNKNOWN})
@@ -422,7 +452,7 @@ def _stated_years(job: Dict[str, Any]) -> Any:
     return None
 
 
-def screen_above_cohort(job: Dict[str, Any]) -> Tuple[bool, str, bool]:
+def screen_above_cohort(job: Dict[str, Any]) -> Tuple[str, str, bool]:
     """
     Sort a job into apply, stretch, or out of reach (F4).
 
@@ -438,11 +468,18 @@ def screen_above_cohort(job: Dict[str, Any]) -> Tuple[bool, str, bool]:
         job: Job dictionary, already leveled by F2 and dated by F3.
 
     Returns:
-        A (tier, reason, needs_review) tuple. tier is '' when the job is out
-        of reach, and reason then says why. needs_review marks a decision
-        resting on softer evidence, for the weekly QA pass -- on a drop it
-        means "we may have thrown away a good job", and on a stretch it means
-        "we put this in front of somebody without being sure".
+        A (tier, reason, needs_review) tuple. tier is ``TIER_APPLY``,
+        ``TIER_STRETCH``, or '' when the job is out of reach, and reason then
+        says why. needs_review marks a decision resting on softer evidence,
+        for the weekly QA pass -- on a drop it means "we may have thrown away
+        a good job", and on a stretch it means "we put this in front of
+        somebody without being sure".
+
+        Note the first element is a tier string, not a keep/drop flag. The
+        two sibling screens above return ``bool`` there; this one stopped
+        being a yes-or-no question when the stretch tier was added, and its
+        annotation said ``bool`` for a while afterwards -- which type
+        checkers flagged at every return statement in the function.
     """
     level = job.get("job_level") or UNKNOWN
     years = _stated_years(job)
