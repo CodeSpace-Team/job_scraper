@@ -11,7 +11,16 @@ Covers the three things F1 has to get right:
 
 import pytest
 
-from src.pipeline.roles import BUSINESS_ANALYSIS, DATA, MOBILE, QA, SOFTWARE, SUPPORT
+from src.pipeline.roles import (
+    BUSINESS_ANALYSIS,
+    DATA,
+    DEVOPS,
+    MOBILE,
+    QA,
+    SECURITY,
+    SOFTWARE,
+    SUPPORT,
+)
 from src.pipeline.screening import (
     MAX_YEARS_FOR_COHORT,
     PUBLISHED_LEVELS,
@@ -29,6 +38,16 @@ from src.pipeline.screening import (
     screen_non_tech,
     screen_off_track,
 )
+
+
+OFF_TRACK_ROLE = "Infrastructure"
+"""
+A role type the board does not publish, for fixtures that need one.
+
+Every tech track the appendix names now ships, so an off-track fixture can
+no longer be "a support job". It has to be a title F1 accepts as technical
+carrying a role type that is not on the list -- which is what this is for.
+"""
 
 
 def make_job(title="", primary_role="", **extra):
@@ -173,10 +192,12 @@ def test_kept_plus_dropped_equals_input():
     ]
     kept, excluded, counts = screen_jobs(jobs)
 
+    # The support technician is kept: technical support is one of the seven
+    # tracks the appendix names.
     assert len(kept) + len(excluded) == len(jobs)
     assert counts["input"] == 4
-    assert counts["kept"] == 1
-    assert counts["dropped_total"] == 3
+    assert counts["kept"] == 2
+    assert counts["dropped_total"] == 2
     assert counts["kept"] + counts["dropped_total"] == counts["input"]
 
 
@@ -226,18 +247,21 @@ def test_log_screening_runs_without_error(capsys):
 
 # ─── Scope: the tracks this course leads to ─────────────────────────────────
 
-@pytest.mark.parametrize("role", [SOFTWARE, MOBILE, QA, BUSINESS_ANALYSIS, DATA])
+@pytest.mark.parametrize("role", [
+    SOFTWARE, SUPPORT, DEVOPS, QA, BUSINESS_ANALYSIS, MOBILE, SECURITY, DATA,
+])
 def test_the_published_tracks_are_on_track(role):
     keep, _reason, _review = screen_off_track(leveled(level="junior", role_type=role))
     assert keep is True
 
 
-@pytest.mark.parametrize("role", [SUPPORT, "DevOps/Cloud", "Security"])
-def test_the_other_tech_tracks_are_off_track(role):
+@pytest.mark.parametrize("role", ["Mining", "Nursing", "Accounting"])
+def test_work_that_is_not_a_track_at_all_is_off_track(role):
     """
-    Real tech jobs, and still not where this course leads -- a service desk
-    leads to infrastructure, not development. They stay on the Exclude tab so
-    widening the scope later is a name in a set, not a rebuild.
+    Every tech track the appendix names now ships. What the scope screen
+    still catches is work that is not on the list at all -- and it stays on
+    the Exclude tab with its reason, so a track added later is a name in a
+    set rather than a rebuild.
     """
     keep, reason, _review = screen_off_track(leveled(level="junior", role_type=role))
     assert keep is False
@@ -257,9 +281,17 @@ def test_a_job_with_no_role_type_is_dropped_and_flagged():
 
 
 def test_the_published_tracks_are_stated_in_one_place():
-    """Core plus adjacent. Support, security and DevOps are deliberately out."""
-    assert PUBLISHED_ROLE_TYPES == {SOFTWARE, MOBILE, QA, BUSINESS_ANALYSIS, DATA}
-    assert SUPPORT not in PUBLISHED_ROLE_TYPES
+    """
+    The appendix's seven, plus Data & BI.
+
+    Data & BI is the one name here CodeSpace did not list. It was added when
+    a live board showed 24 of 29 data jobs coming out of F7 with no track at
+    all, and it is kept because dropping it removes those jobs rather than
+    widening anything.
+    """
+    assert PUBLISHED_ROLE_TYPES == {
+        SOFTWARE, SUPPORT, DEVOPS, QA, BUSINESS_ANALYSIS, MOBILE, SECURITY, DATA,
+    }
 
 
 # ─── F4: apply, stretch, or out of reach ────────────────────────────────────
@@ -276,8 +308,11 @@ def test_the_published_tracks_are_stated_in_one_place():
     ("mid",         None, TIER_STRETCH),
     ("unknown",     None, TIER_STRETCH),
     ("",            None, TIER_STRETCH),
+    # The top of mid: the appendix puts it at 2-4 years, so four is in.
+    ("junior",      4,    TIER_STRETCH),
+    ("mid",         4,    TIER_STRETCH),
     # Out of reach.
-    ("junior",      4,    ""),
+    ("junior",      5,    ""),
     ("mid",         5,    ""),
     ("senior",      None, ""),
     ("lead",        None, ""),
@@ -404,8 +439,8 @@ def test_f1_runs_before_f4():
 def test_each_screen_files_under_its_own_stage():
     _kept, excluded, _counts = screen_jobs([
         make_job("Mining Engineer", "Mining Engineer"),
-        leveled(title="Junior Service Desk Analyst", level="junior",
-                role_type=SUPPORT),
+        leveled(title="Junior Software Developer", level="junior",
+                role_type=OFF_TRACK_ROLE),
         leveled(title="Senior Developer", level="senior"),
     ])
     stages = [job["excluded_stage"] for job in excluded]
@@ -415,12 +450,13 @@ def test_each_screen_files_under_its_own_stage():
 def test_a_senior_job_off_track_is_filed_as_off_track():
     """
     Order matters in the reason, not just the outcome. Scope runs before F4,
-    so a Senior Support Engineer reads as off-track: somebody might widen the
-    scope one day, and nobody is going to widen the cohort to seniors.
+    so a senior job on a track we do not publish reads as off-track: somebody
+    might widen the scope one day, and nobody is going to widen the cohort to
+    seniors.
     """
     _kept, excluded, _counts = screen_jobs([
-        leveled(title="Senior Support Engineer", level="senior",
-                role_type=SUPPORT),
+        leveled(title="Senior Software Developer", level="senior",
+                role_type=OFF_TRACK_ROLE),
     ])
     assert excluded[0]["excluded_stage"] == STAGE_OFF_TRACK
 
@@ -429,8 +465,8 @@ def test_counts_are_split_across_all_three_screens():
     _kept, _excluded, counts = screen_jobs([
         make_job("Mining Engineer", "Mining Engineer"),      # F1 blocklist
         make_job("Operations Manager", "Operations"),        # F1 not accepted
-        leveled(title="Junior IT Support", level="junior",   # off track
-                role_type=SUPPORT),
+        leveled(title="Junior Developer", level="junior",     # off track
+                role_type=OFF_TRACK_ROLE),
         leveled(title="Senior Developer", level="senior"),   # F4 level
         leveled(level="junior", years=7),                    # F4 years
         leveled(level="junior"),                             # kept
@@ -466,7 +502,7 @@ def test_every_kept_job_carries_a_needs_review_field():
 
 def test_the_whole_screen_on_one_realistic_batch():
     """
-    The done-when, in one list. Two reach the board as apply, three as a
+    The done-when, in one list. Three reach the board as apply, four as a
     stretch, and the rest do not reach it at all.
     """
     jobs = [
@@ -474,24 +510,28 @@ def test_the_whole_screen_on_one_realistic_batch():
         leveled(title="Senior Developer", level="senior"),
         leveled(title="Team Lead", level="lead"),
         leveled(title="Principal Engineer", level="principal"),
-        leveled(level="junior", years=4),
+        leveled(level="junior", years=5),
         leveled(level="junior", years=9),
-        # Off track.
-        leveled(title="Junior IT Support", level="junior", role_type=SUPPORT),
+        # Off track: a title F1 accepts, on a track the board does not carry.
+        leveled(title="Junior Software Developer", level="junior",
+                role_type=OFF_TRACK_ROLE),
         # A stretch.
         leveled(title="Mid-level Developer", level="mid"),
         leveled(title="Full Stack Developer", level="unknown"),
         leveled(title="Junior Data Analyst", level="junior", years=3,
                 role_type=DATA),
+        leveled(title="Developer", level="junior", years=4),
         # Straightforwardly in reach.
         leveled(title="Junior Software Developer", level="junior"),
         leveled(title="Graduate Software Engineer", level="entry level"),
+        # On the appendix's list, and until now on the Exclude tab.
+        leveled(title="Junior IT Support", level="junior", role_type=SUPPORT),
     ]
     kept, _excluded, counts = screen_jobs(jobs)
 
-    assert counts["kept_apply"] == 2
-    assert counts["kept_stretch"] == 3
-    assert len(kept) == 5
+    assert counts["kept_apply"] == 3
+    assert counts["kept_stretch"] == 4
+    assert len(kept) == 7
 
     for job in kept:
         assert job["tier"] in (TIER_APPLY, TIER_STRETCH)
