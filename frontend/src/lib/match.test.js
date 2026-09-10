@@ -10,6 +10,7 @@ import {
   ENTRY,
   EVIDENCE,
   JUNIOR,
+  MID,
   YEARS_CEILING,
   canSearch,
   ceilingFor,
@@ -75,7 +76,34 @@ describe('matchesLevel', () => {
 
   it('takes the more generous ceiling when both levels are selected', () => {
     expect(ceilingFor([ENTRY, JUNIOR])).toBe(YEARS_CEILING[JUNIOR])
-    expect(matchesLevel(job({ experience_years: 3 }), [ENTRY, JUNIOR]).matches).toBe(true)
+    expect(matchesLevel(job({ experience_years: 2 }), [ENTRY, JUNIOR]).matches).toBe(true)
+  })
+
+  it('offers mid, and stops it at four years', () => {
+    // The appendix's third level: 2-4 years. A student two years in ticks
+    // this and sees four-year adverts; somebody fresh ticks entry and does
+    // not. Five years is above the whole cohort and matches nothing.
+    expect(YEARS_CEILING[MID]).toBe(4)
+    expect(matchesLevel(job({ experience_years: 4 }), [MID]).matches).toBe(true)
+    expect(matchesLevel(job({ experience_years: 5 }), [MID]).matches).toBe(false)
+  })
+
+  it('keeps mid separate from junior rather than widening it', () => {
+    // The point of a third checkbox is that it is a choice. If a four-year
+    // advert came back to somebody who ticked only junior, mid would be
+    // decoration and the level filter would be back where it started.
+    expect(matchesLevel(job({ experience_years: 4 }), [JUNIOR]).matches).toBe(false)
+    expect(matchesLevel(job({ experience_years: 4 }), [ENTRY]).matches).toBe(false)
+    expect(matchesLevel(job({ experience_years: 4 }), [JUNIOR, MID]).matches).toBe(true)
+  })
+
+  it('agrees with the pipeline about where junior ends', () => {
+    // The client's definition, and levels.level_from_years': junior is 0-2,
+    // mid starts at 3. A student asking for junior work should not be handed
+    // an advert the pipeline itself has labelled mid.
+    expect(YEARS_CEILING[JUNIOR]).toBe(2)
+    expect(matchesLevel(job({ experience_years: 3 }), [JUNIOR]).matches).toBe(false)
+    expect(matchesLevel(job({ experience_years: 3 }), [ENTRY, JUNIOR]).matches).toBe(false)
   })
 })
 
